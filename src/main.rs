@@ -1,6 +1,18 @@
+mod buffers;
 mod extensions_api;
 
-use extensions_api::{ExtensionsApiEvent, ExtensionApiClient};
+use buffers::OutboundBuffer;
+use bytes::Bytes;
+use extensions_api::{ExtensionApiClient, ExtensionsApiEvent};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Clone, Copy)]
+pub enum Signal {
+    Traces,
+    Metrics,
+    Logs,
+}
 
 #[tokio::main]
 async fn main() {
@@ -8,26 +20,85 @@ async fn main() {
         .install_default()
         .expect("failed to install rustls ring provider");
 
-    let runtime_api =
-        std::env::var("AWS_LAMBDA_RUNTIME_API").expect("AWS_LAMBDA_RUNTIME_API was not set in the environment. This variable is set by the Lambda service when the extension is invoked");
+    // TODO: Parse and validate configuration
 
+    let runtime_api =
+        std::env::var("AWS_LAMBDA_RUNTIME_API").expect("AWS_LAMBDA_RUNTIME_API was not set");
+
+    // Register with Extensions API
     let ext = ExtensionApiClient::register(&runtime_api)
         .await
-        .expect("failed to register extension with Lambda runtime API");
+        .expect("failed to register extension");
 
+    let cancel = CancellationToken::new();
+    let mut buffer = OutboundBuffer::new();
+
+    // OTLP listener → buffer
+    let (otlp_tx, mut otlp_rx) = mpsc::channel::<(Signal, Bytes)>(128);
+
+    // Telemetry API listener → event processor
+    let (telemetry_tx, mut telemetry_rx) = mpsc::channel::<Bytes>(64);
+
+    // Task 1: OTLP listener on localhost:4318
+    // Accepts OTLP/HTTP protobuf on POST /v1/{traces,metrics,logs}
+    // Each request: read body → send to otlp_tx → respond 200 OK
+    let otlp_cancel = cancel.clone();
+    let otlp_task = tokio::spawn(async move {
+        // TODO: hyper HTTP server bound to 127.0.0.1:4318
+        let _tx = otlp_tx;
+        otlp_cancel.cancelled().await;
+    });
+
+    // Task 2: Telemetry API listener on 0.0.0.0:4319
+    // Receives platform events (platform.runtimeDone, platform.start) from Lambda
+    let telemetry_cancel = cancel.clone();
+    let telemetry_task = tokio::spawn(async move {
+        // TODO: hyper HTTP server bound to 0.0.0.0:4319
+        let _tx = telemetry_tx;
+        telemetry_cancel.cancelled().await;
+    });
+
+    // TODO: Subscribe to Lambda Telemetry API
+
+    // Event loop — multiplexes extensions API, OTLP payloads, and telemetry events
     loop {
-        match ext.next_event().await {
-            Ok(ExtensionsApiEvent::Invoke { request_id }) => {
-                eprintln!("invoke: requestId={request_id}");
+        tokio::select! {
+            event = ext.next_event() => {
+                match event {
+                    Ok(ExtensionsApiEvent::Invoke { request_id }) => {
+                        eprintln!("invoke: requestId={request_id}");
+                        // TODO: Post-invocation flush for previous invocation
+                        // TODO: Record invocation metadata in state map
+                    }
+                    Ok(ExtensionsApiEvent::Shutdown { reason }) => {
+                        eprintln!("shutdown: reason={reason}");
+                        cancel.cancel();
+
+                        // Drain any payloads still in the channel
+                        otlp_rx.close();
+                        while let Some((signal, payload)) = otlp_rx.recv().await {
+                            buffer.push(signal, payload);
+                        }
+
+                        // TODO: Flush entire buffer to collector with shutdown timeout
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                    }
+                }
             }
-            Ok(ExtensionsApiEvent::Shutdown { reason }) => {
-                eprintln!("shutdown: reason={reason}");
-                break;
+            Some((signal, payload)) = otlp_rx.recv() => {
+                buffer.push(signal, payload);
+                // TODO: Check race flush trigger
+                // TODO: Check buffer size threshold
             }
-            Err(e) => {
-                eprintln!("error: {e}");
-                continue;
+            Some(event) = telemetry_rx.recv() => {
+                let _event = event;
+                // TODO: Process platform.runtimeDone, platform.start
             }
         }
     }
+
+    let _ = tokio::join!(otlp_task, telemetry_task);
 }

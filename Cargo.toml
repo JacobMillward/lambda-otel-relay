@@ -9,6 +9,8 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"]}
 nanoserde = { version = "0.2", features = ["std", "json"] }
 thiserror = "2.0.18"
+tokio-util = { version = "0.7", features = ["rt"] }
+bytes = "1"
 
 [profile.release]
 strip = true
