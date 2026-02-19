@@ -1,18 +1,12 @@
 mod buffers;
 mod extensions_api;
+mod otlp_listener;
 
-use buffers::OutboundBuffer;
+use buffers::{OutboundBuffer, Signal};
 use bytes::Bytes;
 use extensions_api::{ExtensionApiClient, ExtensionsApiEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-
-#[derive(Debug, Clone, Copy)]
-pub enum Signal {
-    Traces,
-    Metrics,
-    Logs,
-}
 
 #[tokio::main]
 async fn main() {
@@ -40,14 +34,8 @@ async fn main() {
     let (telemetry_tx, mut telemetry_rx) = mpsc::channel::<Bytes>(64);
 
     // Task 1: OTLP listener on localhost:4318
-    // Accepts OTLP/HTTP protobuf on POST /v1/{traces,metrics,logs}
-    // Each request: read body → send to otlp_tx → respond 200 OK
     let otlp_cancel = cancel.clone();
-    let otlp_task = tokio::spawn(async move {
-        // TODO: hyper HTTP server bound to 127.0.0.1:4318
-        let _tx = otlp_tx;
-        otlp_cancel.cancelled().await;
-    });
+    let otlp_task = tokio::spawn(otlp_listener::serve(4318, otlp_tx, otlp_cancel));
 
     // Task 2: Telemetry API listener on 0.0.0.0:4319
     // Receives platform events (platform.runtimeDone, platform.start) from Lambda

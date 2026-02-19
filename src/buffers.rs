@@ -2,7 +2,12 @@ use std::collections::VecDeque;
 
 use bytes::Bytes;
 
-use crate::Signal;
+#[derive(Debug, Clone, Copy)]
+pub enum Signal {
+    Traces,
+    Metrics,
+    Logs,
+}
 
 pub struct SignalBuffer {
     pub queue: VecDeque<Bytes>,
