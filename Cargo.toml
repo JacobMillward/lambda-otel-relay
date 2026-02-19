@@ -1,0 +1,17 @@
+[package]
+name = "lambda-otel-flush"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "gzip"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"]}
+nanoserde = { version = "0.2", features = ["std", "json"] }
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
