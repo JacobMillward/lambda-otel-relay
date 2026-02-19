@@ -1,4 +1,5 @@
 mod buffers;
+mod config;
 mod extensions_api;
 mod otlp_listener;
 
@@ -14,7 +15,7 @@ async fn main() {
         .install_default()
         .expect("failed to install rustls ring provider");
 
-    // TODO: Parse and validate configuration
+    let config = config::Config::from_env().unwrap_or_else(|e| config::fatal(&e));
 
     let runtime_api =
         std::env::var("AWS_LAMBDA_RUNTIME_API").expect("AWS_LAMBDA_RUNTIME_API was not set");
@@ -35,7 +36,7 @@ async fn main() {
 
     // Task 1: OTLP listener on localhost:4318
     let otlp_cancel = cancel.clone();
-    let otlp_task = tokio::spawn(otlp_listener::serve(4318, otlp_tx, otlp_cancel));
+    let otlp_task = tokio::spawn(otlp_listener::serve(config.listener_port, otlp_tx, otlp_cancel));
 
     // Task 2: Telemetry API listener on 0.0.0.0:4319
     // Receives platform events (platform.runtimeDone, platform.start) from Lambda
