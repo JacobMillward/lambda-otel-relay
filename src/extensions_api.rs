@@ -1,7 +1,7 @@
 use nanoserde::DeJson;
 use thiserror::Error;
 
-const EXTENSION_NAME: &str = "lambda-otel-flush";
+const EXTENSION_NAME: &str = "lambda-otel-relay";
 
 #[derive(Debug, Error)]
 pub enum ApiError {

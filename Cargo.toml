@@ -1,5 +1,5 @@
 [package]
-name = "lambda-otel-flush"
+name = "lambda-otel-relay"
 version = "0.1.0"
 edition = "2024"
 
