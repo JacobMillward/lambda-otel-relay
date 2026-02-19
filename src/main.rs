@@ -1,96 +1,32 @@
-use nanoserde::DeJson;
+mod extensions_api;
 
-#[derive(DeJson)]
-struct RegisterResponse {
-    #[nserde(rename = "functionName")]
-    function_name: String,
-    #[nserde(rename = "functionVersion")]
-    function_version: String,
-    handler: String,
-}
-
-#[derive(DeJson)]
-struct EventResponse {
-    #[nserde(rename = "eventType")]
-    event_type: String,
-    #[nserde(rename = "requestId")]
-    request_id: Option<String>,
-    #[nserde(rename = "shutdownReason")]
-    shutdown_reason: Option<String>,
-}
+use extensions_api::{ExtensionsApiEvent, ExtensionApiClient};
 
 #[tokio::main]
 async fn main() {
-    let runtime_api =
-        std::env::var("AWS_LAMBDA_RUNTIME_API").expect("AWS_LAMBDA_RUNTIME_API not set");
-    let base_url = format!("http://{runtime_api}/2020-01-01/extension");
-
     rustls::crypto::ring::default_provider()
-      .install_default()
-      .expect("failed to install crypto provider");
+        .install_default()
+        .expect("failed to install rustls ring provider");
 
-    let client = reqwest::Client::new();
+    let runtime_api =
+        std::env::var("AWS_LAMBDA_RUNTIME_API").expect("AWS_LAMBDA_RUNTIME_API was not set in the environment. This variable is set by the Lambda service when the extension is invoked");
 
-    // Register as an external extension
-    let register_resp = client
-        .post(format!("{base_url}/register"))
-        .header("Lambda-Extension-Name", "lambda-otel-flush")
-        .body(r#"{"events":["INVOKE","SHUTDOWN"]}"#)
-        .send()
+    let ext = ExtensionApiClient::register(&runtime_api)
         .await
-        .expect("failed to register extension");
+        .expect("failed to register extension with Lambda runtime API");
 
-    let ext_id = register_resp
-        .headers()
-        .get("Lambda-Extension-Identifier")
-        .expect("missing Lambda-Extension-Identifier header")
-        .to_str()
-        .expect("non-ascii extension identifier")
-        .to_owned();
-
-    let body = register_resp
-        .text()
-        .await
-        .expect("failed to read register response body");
-    let reg: RegisterResponse =
-        DeJson::deserialize_json(&body).expect("failed to parse register response");
-    eprintln!(
-        "registered: function={} version={} handler={}",
-        reg.function_name, reg.function_version, reg.handler
-    );
-
-    // Event loop
     loop {
-        let resp = client
-            .get(format!("{base_url}/event/next"))
-            .header("Lambda-Extension-Identifier", &ext_id)
-            .send()
-            .await
-            .expect("failed to get next event");
-
-        let body = resp
-            .text()
-            .await
-            .expect("failed to read event response body");
-        let event: EventResponse =
-            DeJson::deserialize_json(&body).expect("failed to parse event response");
-
-        match event.event_type.as_str() {
-            "INVOKE" => {
-                eprintln!(
-                    "invoke: requestId={}",
-                    event.request_id.as_deref().unwrap_or("unknown")
-                );
+        match ext.next_event().await {
+            Ok(ExtensionsApiEvent::Invoke { request_id }) => {
+                eprintln!("invoke: requestId={request_id}");
             }
-            "SHUTDOWN" => {
-                eprintln!(
-                    "shutdown: reason={}",
-                    event.shutdown_reason.as_deref().unwrap_or("unknown")
-                );
+            Ok(ExtensionsApiEvent::Shutdown { reason }) => {
+                eprintln!("shutdown: reason={reason}");
                 break;
             }
-            other => {
-                eprintln!("unknown event type: {other}");
+            Err(e) => {
+                eprintln!("error: {e}");
+                continue;
             }
         }
     }

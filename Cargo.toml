@@ -8,6 +8,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "gzip"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"]}
 nanoserde = { version = "0.2", features = ["std", "json"] }
+thiserror = "2.0.18"
 
 [profile.release]
 strip = true
