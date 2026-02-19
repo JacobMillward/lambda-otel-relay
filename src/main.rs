@@ -36,7 +36,11 @@ async fn main() {
 
     // Task 1: OTLP listener on localhost:4318
     let otlp_cancel = cancel.clone();
-    let otlp_task = tokio::spawn(otlp_listener::serve(config.listener_port, otlp_tx, otlp_cancel));
+    let otlp_task = tokio::spawn(otlp_listener::serve(
+        config.listener_port,
+        otlp_tx,
+        otlp_cancel,
+    ));
 
     // Task 2: Telemetry API listener on 0.0.0.0:4319
     // Receives platform events (platform.runtimeDone, platform.start) from Lambda

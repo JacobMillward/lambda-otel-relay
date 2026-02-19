@@ -115,13 +115,17 @@ mod tests {
     #[test]
     fn parse_invoke() {
         let event = parse_event(r#"{"eventType":"INVOKE","requestId":"req-abc-123"}"#).unwrap();
-        assert!(matches!(event, ExtensionsApiEvent::Invoke { request_id } if request_id == "req-abc-123"));
+        assert!(
+            matches!(event, ExtensionsApiEvent::Invoke { request_id } if request_id == "req-abc-123")
+        );
     }
 
     #[test]
     fn parse_invoke_missing_request_id() {
         let event = parse_event(r#"{"eventType":"INVOKE"}"#).unwrap();
-        assert!(matches!(event, ExtensionsApiEvent::Invoke { request_id } if request_id.is_empty()));
+        assert!(
+            matches!(event, ExtensionsApiEvent::Invoke { request_id } if request_id.is_empty())
+        );
     }
 
     #[test]

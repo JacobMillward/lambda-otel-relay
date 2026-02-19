@@ -30,7 +30,8 @@ pub trait WaitForLog {
 
 impl<I: Image> WaitForLog for ContainerAsync<I> {
     async fn wait_for_log(&self, target: LogStream<'_>) -> String {
-        self.wait_for_log_with_timeout(target, DEFAULT_TIMEOUT).await
+        self.wait_for_log_with_timeout(target, DEFAULT_TIMEOUT)
+            .await
     }
 
     async fn wait_for_log_with_timeout(&self, target: LogStream<'_>, timeout: Duration) -> String {

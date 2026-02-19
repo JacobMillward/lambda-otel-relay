@@ -165,8 +165,7 @@ async fn extension_returns_200_v1_metrics() {
 #[tokio::test]
 async fn extension_returns_200_v1_logs() {
     let ctx = setup();
-    let container =
-        start_lambda_container_with_env(&ctx, &[("TEST_OTLP_PATH", "/v1/logs")]).await;
+    let container = start_lambda_container_with_env(&ctx, &[("TEST_OTLP_PATH", "/v1/logs")]).await;
 
     let body = invoke_function(&container).await;
     assert!(
