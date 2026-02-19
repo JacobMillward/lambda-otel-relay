@@ -42,7 +42,14 @@ fn setup() -> TestContext {
 /// Start a Lambda RIE container with the extension and bootstrap mounted.
 /// The RIE uses lazy init — extensions only start on the first invocation.
 async fn start_lambda_container(ctx: &TestContext) -> ContainerAsync<GenericImage> {
-    GenericImage::new("public.ecr.aws/lambda/provided", "al2023")
+    start_lambda_container_with_env(ctx, &[]).await
+}
+
+async fn start_lambda_container_with_env(
+    ctx: &TestContext,
+    extra_env: &[(&str, &str)],
+) -> ContainerAsync<GenericImage> {
+    let mut image = GenericImage::new("public.ecr.aws/lambda/provided", "al2023")
         .with_exposed_port(8080.tcp())
         .with_wait_for(WaitFor::message_on_stderr("exec '/var/runtime/bootstrap'"))
         .with_mount(testcontainers::core::Mount::bind_mount(
@@ -59,10 +66,35 @@ async fn start_lambda_container(ctx: &TestContext) -> ContainerAsync<GenericImag
         ))
         .with_cmd(["bootstrap"])
         .with_startup_timeout(Duration::from_secs(30))
-        .with_env_var("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")
+        .with_env_var("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318");
+
+    for (key, val) in extra_env {
+        image = image.with_env_var(*key, *val);
+    }
+
+    image
         .start()
         .await
         .expect("Failed to start Lambda RIE container")
+}
+
+async fn invoke_function(container: &ContainerAsync<GenericImage>) -> String {
+    let host_port = container
+        .get_host_port_ipv4(8080.tcp())
+        .await
+        .expect("Failed to get mapped port");
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{host_port}/2015-03-31/functions/function/invocations"
+        ))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .expect("Failed to invoke Lambda function");
+
+    resp.text().await.expect("Failed to read response body")
 }
 
 #[test]
@@ -88,31 +120,12 @@ async fn extension_registers_and_handles_invoke() {
     let ctx = setup();
     let container = start_lambda_container(&ctx).await;
 
-    let host_port = container
-        .get_host_port_ipv4(8080.tcp())
-        .await
-        .expect("Failed to get mapped port");
-
-    // Invoke the Lambda function through the RIE.
-    // This triggers extension init: register -> INVOKE event -> handler runs.
-    let resp = reqwest::Client::new()
-        .post(format!(
-            "http://127.0.0.1:{host_port}/2015-03-31/functions/function/invocations"
-        ))
-        .header("Content-Type", "application/json")
-        .body("{}")
-        .send()
-        .await
-        .expect("Failed to invoke Lambda function");
-
-    let body = resp.text().await.expect("Failed to read response body");
+    let body = invoke_function(&container).await;
     assert!(
         body.contains("statusCode"),
         "Lambda invoke should return handler response. Body: {body}"
     );
 
-    // Wait for the extension to log the invoke event, then verify registration too.
-    // "registered:" comes from eprintln! in src/extensions_api.rs
     let logs = container
         .wait_for_log(LogStream::Stdout("invoke: requestId="))
         .await;
@@ -120,5 +133,44 @@ async fn extension_registers_and_handles_invoke() {
     assert!(
         logs.contains("registered:"),
         "Extension should have logged successful registration. Logs:\n{logs}"
+    );
+}
+
+#[tokio::test]
+async fn extension_returns_200_v1_traces() {
+    let ctx = setup();
+    let container =
+        start_lambda_container_with_env(&ctx, &[("TEST_OTLP_PATH", "/v1/traces")]).await;
+
+    let body = invoke_function(&container).await;
+    assert!(
+        body.contains("\"otlpStatus\":200") || body.contains("\"otlpStatus\": 200"),
+        "OTLP listener should return 200 for POST /v1/traces. Body: {body}"
+    );
+}
+
+#[tokio::test]
+async fn extension_returns_200_v1_metrics() {
+    let ctx = setup();
+    let container =
+        start_lambda_container_with_env(&ctx, &[("TEST_OTLP_PATH", "/v1/metrics")]).await;
+
+    let body = invoke_function(&container).await;
+    assert!(
+        body.contains("\"otlpStatus\":200") || body.contains("\"otlpStatus\": 200"),
+        "OTLP listener should return 200 for POST /v1/metrics. Body: {body}"
+    );
+}
+
+#[tokio::test]
+async fn extension_returns_200_v1_logs() {
+    let ctx = setup();
+    let container =
+        start_lambda_container_with_env(&ctx, &[("TEST_OTLP_PATH", "/v1/logs")]).await;
+
+    let body = invoke_function(&container).await;
+    assert!(
+        body.contains("\"otlpStatus\":200") || body.contains("\"otlpStatus\": 200"),
+        "OTLP listener should return 200 for POST /v1/logs. Body: {body}"
     );
 }

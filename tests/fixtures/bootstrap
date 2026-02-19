@@ -1,13 +1,27 @@
 #!/bin/sh
 
-# This is a simple bootstrap script that continuously polls the Lambda Runtime API for new invocations and responds with a 200 status code.
-# It is used to test the extension's ability to handle invocations and shutdown events.
+# Minimal Lambda runtime handler for integration tests.
+# Polls the Runtime API, optionally POSTs to the extension's OTLP listener,
+# and responds with the result.
+#
+# Set TEST_OTLP_PATH (e.g. /v1/traces) to have the handler POST to the
+# extension's OTLP listener and include the HTTP status in the response.
 
 set -e
 while true; do
   HEADERS="$(mktemp)"
   EVENT_DATA=$(curl -sS -LD "$HEADERS" "http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime/invocation/next")
   REQUEST_ID=$(grep -Fi Lambda-Runtime-Aws-Request-Id "$HEADERS" | tr -d '[:space:]' | cut -d: -f2)
-  curl -sS -X POST "http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime/invocation/$REQUEST_ID/response" -d '{"statusCode": 200}'
+
+  OTLP_STATUS="null"
+  if [ -n "$TEST_OTLP_PATH" ]; then
+    OTLP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
+      -X POST "http://localhost:4318${TEST_OTLP_PATH}" \
+      -H "Content-Type: application/x-protobuf" \
+      -d "test-payload")
+  fi
+
+  curl -sS -X POST "http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime/invocation/$REQUEST_ID/response" \
+    -d "{\"statusCode\": 200, \"otlpStatus\": ${OTLP_STATUS}}"
   rm -f "$HEADERS"
 done
