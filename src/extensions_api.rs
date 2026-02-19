@@ -34,11 +34,13 @@ struct ExtensionsApiEventResponse {
     shutdown_reason: Option<String>,
 }
 
+#[derive(Debug)]
 pub enum ExtensionsApiEvent {
     Invoke { request_id: String },
     Shutdown { reason: String },
 }
 
+#[derive(Debug)]
 pub struct ExtensionApiClient {
     client: reqwest::Client,
     base_url: String,
@@ -88,16 +90,67 @@ impl ExtensionApiClient {
             .await?;
 
         let body = resp.text().await?;
-        let raw: ExtensionsApiEventResponse = DeJson::deserialize_json(&body)?;
+        parse_event(&body)
+    }
+}
 
-        match raw.event_type.as_str() {
-            "INVOKE" => Ok(ExtensionsApiEvent::Invoke {
-                request_id: raw.request_id.unwrap_or_default(),
-            }),
-            "SHUTDOWN" => Ok(ExtensionsApiEvent::Shutdown {
-                reason: raw.shutdown_reason.unwrap_or_default(),
-            }),
-            other => Err(ApiError::UnknownExtensionsApiEventType(other.to_owned())),
-        }
+fn parse_event(body: &str) -> Result<ExtensionsApiEvent, ApiError> {
+    let raw: ExtensionsApiEventResponse = DeJson::deserialize_json(body)?;
+
+    match raw.event_type.as_str() {
+        "INVOKE" => Ok(ExtensionsApiEvent::Invoke {
+            request_id: raw.request_id.unwrap_or_default(),
+        }),
+        "SHUTDOWN" => Ok(ExtensionsApiEvent::Shutdown {
+            reason: raw.shutdown_reason.unwrap_or_default(),
+        }),
+        other => Err(ApiError::UnknownExtensionsApiEventType(other.to_owned())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_invoke() {
+        let event = parse_event(r#"{"eventType":"INVOKE","requestId":"req-abc-123"}"#).unwrap();
+        assert!(matches!(event, ExtensionsApiEvent::Invoke { request_id } if request_id == "req-abc-123"));
+    }
+
+    #[test]
+    fn parse_invoke_missing_request_id() {
+        let event = parse_event(r#"{"eventType":"INVOKE"}"#).unwrap();
+        assert!(matches!(event, ExtensionsApiEvent::Invoke { request_id } if request_id.is_empty()));
+    }
+
+    #[test]
+    fn parse_shutdown() {
+        let event = parse_event(r#"{"eventType":"SHUTDOWN","shutdownReason":"timeout"}"#).unwrap();
+        assert!(matches!(event, ExtensionsApiEvent::Shutdown { reason } if reason == "timeout"));
+    }
+
+    #[test]
+    fn parse_shutdown_missing_reason() {
+        let event = parse_event(r#"{"eventType":"SHUTDOWN"}"#).unwrap();
+        assert!(matches!(event, ExtensionsApiEvent::Shutdown { reason } if reason.is_empty()));
+    }
+
+    #[test]
+    fn parse_unknown_event_type() {
+        let err = parse_event(r#"{"eventType":"BANANA"}"#).unwrap_err();
+        assert!(matches!(err, ApiError::UnknownExtensionsApiEventType(t) if t == "BANANA"));
+    }
+
+    #[test]
+    fn parse_malformed_json() {
+        let err = parse_event("{not valid").unwrap_err();
+        assert!(matches!(err, ApiError::Parse(_)));
+    }
+
+    #[test]
+    fn parse_empty_body() {
+        let err = parse_event("").unwrap_err();
+        assert!(matches!(err, ApiError::Parse(_)));
     }
 }
