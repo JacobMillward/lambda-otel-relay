@@ -19,6 +19,37 @@ fn response(status: StatusCode) -> Response<Full<Bytes>> {
         .unwrap()
 }
 
+/// Validate the incoming request: route, method, and body.
+async fn validate<B>(req: Request<B>) -> Result<(Signal, Bytes), (StatusCode, String)>
+where
+    B: hyper::body::Body<Data = Bytes> + Send + 'static,
+{
+    let path = req.uri().path().to_owned();
+    let method = req.method().clone();
+
+    let signal = match path.as_str() {
+        "/v1/traces" => Ok(Signal::Traces),
+        "/v1/metrics" => Ok(Signal::Metrics),
+        "/v1/logs" => Ok(Signal::Logs),
+        _ => Err((StatusCode::NOT_FOUND, format!("unknown path: {path}"))),
+    }
+    .and_then(|signal| {
+        if method == Method::POST {
+            Ok(signal)
+        } else {
+            Err((StatusCode::METHOD_NOT_ALLOWED, format!("{method} {path}")))
+        }
+    })?;
+
+    let body = req
+        .collect()
+        .await
+        .map(|c| c.to_bytes())
+        .map_err(|_| (StatusCode::BAD_REQUEST, format!("POST {path} — failed to read body")))?;
+
+    Ok((signal, body))
+}
+
 async fn handle<B>(
     req: Request<B>,
     tx: mpsc::Sender<(Signal, Bytes)>,
@@ -26,20 +57,12 @@ async fn handle<B>(
 where
     B: hyper::body::Body<Data = Bytes> + Send + 'static,
 {
-    let signal = match req.uri().path() {
-        "/v1/traces" => Signal::Traces,
-        "/v1/metrics" => Signal::Metrics,
-        "/v1/logs" => Signal::Logs,
-        _ => return Ok(response(StatusCode::NOT_FOUND)),
-    };
-
-    if req.method() != Method::POST {
-        return Ok(response(StatusCode::METHOD_NOT_ALLOWED));
-    }
-
-    let body = match req.collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(_) => return Ok(response(StatusCode::BAD_REQUEST)),
+    let (signal, body) = match validate(req).await {
+        Ok(pair) => pair,
+        Err((status, reason)) => {
+            eprintln!("otlp request rejected: {reason}");
+            return Ok(response(status));
+        }
     };
 
     use tokio::sync::mpsc::error::TrySendError;
