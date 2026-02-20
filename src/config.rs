@@ -68,10 +68,6 @@ fn parse_port(
     }
 }
 
-pub fn fatal(err: &ConfigError) -> ! {
-    eprintln!("{{\"level\":\"FATAL\",\"msg\":\"{err}\"}}");
-    std::process::exit(1);
-}
 
 #[cfg(test)]
 mod tests {

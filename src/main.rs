@@ -13,6 +13,13 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+/// Operational init failure — log and exit.
+/// Use `expect` instead for programming invariants (bugs).
+fn fatal(msg: &str, error: &dyn std::fmt::Display) -> ! {
+    error!(%error, "{msg}");
+    std::process::exit(1);
+}
+
 fn setup_logging() {
     tracing_subscriber::fmt()
         .json()
@@ -21,23 +28,26 @@ fn setup_logging() {
         .init();
 }
 
-#[tokio::main]
-async fn main() {
-    setup_logging();
-
+fn setup_rustls() {
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("failed to install rustls ring provider");
+}
 
-    let config = config::Config::from_env().unwrap_or_else(|e| config::fatal(&e));
+#[tokio::main]
+async fn main() {
+    setup_logging();
+    setup_rustls();
 
-    let runtime_api =
-        std::env::var("AWS_LAMBDA_RUNTIME_API").expect("AWS_LAMBDA_RUNTIME_API was not set");
+    let config = config::Config::from_env().unwrap_or_else(|e| fatal("config error", &e));
+
+    let runtime_api = std::env::var("AWS_LAMBDA_RUNTIME_API")
+        .unwrap_or_else(|e| fatal("AWS_LAMBDA_RUNTIME_API not set in the environment. This extension must be run within a Lambda environment.", &e));
 
     // Register with Extensions API
     let ext = ExtensionApiClient::register(&runtime_api)
         .await
-        .expect("failed to register extension");
+        .unwrap_or_else(|e| fatal("failed to register extension", &e));
 
     let cancel = CancellationToken::new();
     let mut buffer = OutboundBuffer::new();
