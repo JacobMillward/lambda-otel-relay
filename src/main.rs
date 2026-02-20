@@ -1,5 +1,6 @@
 mod buffers;
 mod config;
+mod exporter;
 mod extensions_api;
 mod otlp_listener;
 
@@ -60,8 +61,12 @@ async fn main() {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
                         eprintln!("invoke: requestId={request_id}");
-                        // TODO: Post-invocation flush for previous invocation
-                        // TODO: Record invocation metadata in state map
+                        // TODO: record invocation metadata in state map
+
+                        // Post-invocation flush: export buffered data from previous invocation
+                        if let Err(e) = exporter::export(&config.endpoint, &mut buffer).await {
+                            eprintln!("flush error: {e}");
+                        }
                     }
                     Ok(ExtensionsApiEvent::Shutdown { reason }) => {
                         eprintln!("shutdown: reason={reason}");
@@ -73,7 +78,9 @@ async fn main() {
                             buffer.push(signal, payload);
                         }
 
-                        // TODO: Flush entire buffer to collector with shutdown timeout
+                        if let Err(e) = exporter::export(&config.endpoint, &mut buffer).await {
+                            eprintln!("shutdown flush error: {e}");
+                        }
                         break;
                     }
                     Err(e) => {
@@ -83,8 +90,8 @@ async fn main() {
             }
             Some((signal, payload)) = otlp_rx.recv() => {
                 buffer.push(signal, payload);
-                // TODO: Check race flush trigger
-                // TODO: Check buffer size threshold
+                // TODO: race flush trigger (mid-invocation background flush)
+                // TODO: buffer size threshold flush
             }
             Some(event) = telemetry_rx.recv() => {
                 let _event = event;
