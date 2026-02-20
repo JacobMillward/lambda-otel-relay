@@ -3,10 +3,12 @@ mod config;
 mod exporter;
 mod extensions_api;
 mod otlp_listener;
+mod telemetry_listener;
 
 use buffers::{OutboundBuffer, Signal};
 use bytes::Bytes;
 use extensions_api::{ExtensionApiClient, ExtensionsApiEvent};
+use telemetry_listener::TelemetryEvent;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -33,7 +35,7 @@ async fn main() {
     let (otlp_tx, mut otlp_rx) = mpsc::channel::<(Signal, Bytes)>(128);
 
     // Telemetry API listener → event processor
-    let (telemetry_tx, mut telemetry_rx) = mpsc::channel::<Bytes>(64);
+    let (telemetry_tx, mut telemetry_rx) = mpsc::channel::<TelemetryEvent>(64);
 
     // Task 1: OTLP listener on localhost:4318
     let otlp_cancel = cancel.clone();
@@ -46,11 +48,11 @@ async fn main() {
     // Task 2: Telemetry API listener on 0.0.0.0:4319
     // Receives platform events (platform.runtimeDone, platform.start) from Lambda
     let telemetry_cancel = cancel.clone();
-    let telemetry_task = tokio::spawn(async move {
-        // TODO: hyper HTTP server bound to 0.0.0.0:4319
-        let _tx = telemetry_tx;
-        telemetry_cancel.cancelled().await;
-    });
+    let telemetry_task = tokio::spawn(telemetry_listener::serve(
+        config.telemetry_port,
+        telemetry_tx,
+        telemetry_cancel,
+    ));
 
     // TODO: Subscribe to Lambda Telemetry API
 
@@ -94,8 +96,17 @@ async fn main() {
                 // TODO: buffer size threshold flush
             }
             Some(event) = telemetry_rx.recv() => {
-                let _event = event;
-                // TODO: Process platform.runtimeDone, platform.start
+                match event {
+                    TelemetryEvent::RuntimeDone { request_id, status } => {
+                        eprintln!("runtimeDone: requestId={request_id} status={status}");
+                        // TODO: update invocation state map, emit timeout log record
+                    }
+                    TelemetryEvent::Start { request_id, tracing_value } => {
+                        let _tracing_value = tracing_value;
+                        eprintln!("start: requestId={request_id}");
+                        // TODO: extract X-Ray trace ID, store in state map
+                    }
+                }
             }
         }
     }
