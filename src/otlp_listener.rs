@@ -60,7 +60,7 @@ where
     let (signal, body) = match validate(req).await {
         Ok(pair) => pair,
         Err((status, reason)) => {
-            eprintln!("otlp request rejected: {reason}");
+            tracing::warn!(reason, "otlp request rejected");
             return Ok(response(status));
         }
     };

@@ -58,7 +58,7 @@ where
     let body_str = match validate(req).await {
         Ok(s) => s,
         Err((status, reason)) => {
-            eprintln!("telemetry request rejected: {reason}");
+            tracing::warn!(reason, "telemetry request rejected");
             return Ok(response(status));
         }
     };
@@ -66,7 +66,7 @@ where
     let events = TelemetryEvent::parse_batch(&body_str);
     for event in events {
         if let Err(e) = tx.try_send(event) {
-            eprintln!("telemetry event dropped: {e}");
+            tracing::warn!(error = %e, "telemetry event dropped");
         }
     }
 

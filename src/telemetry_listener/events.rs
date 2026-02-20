@@ -43,7 +43,7 @@ impl TelemetryEvent {
         let raw: Vec<RawTelemetryEvent> = match DeJson::deserialize_json(body) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("telemetry batch parse failed: {e}");
+                tracing::warn!(error = %e, "telemetry batch parse failed");
                 return Vec::new();
             }
         };

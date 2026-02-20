@@ -69,9 +69,11 @@ impl ExtensionApiClient {
 
         let body = resp.text().await?;
         let reg: RegisterResponse = DeJson::deserialize_json(&body)?;
-        eprintln!(
-            "registered: function={} version={} handler={}",
-            reg.function_name, reg.function_version, reg.handler
+        tracing::info!(
+            function = reg.function_name,
+            version = reg.function_version,
+            handler = reg.handler,
+            "registered"
         );
 
         Ok(Self {

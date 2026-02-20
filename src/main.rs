@@ -11,9 +11,20 @@ use extensions_api::{ExtensionApiClient, ExtensionsApiEvent};
 use telemetry_listener::TelemetryEvent;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
+
+fn setup_logging() {
+    tracing_subscriber::fmt()
+        .json()
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .init();
+}
 
 #[tokio::main]
 async fn main() {
+    setup_logging();
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("failed to install rustls ring provider");
@@ -62,16 +73,16 @@ async fn main() {
             event = ext.next_event() => {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
-                        eprintln!("invoke: requestId={request_id}");
+                        info!(request_id, "invoke");
                         // TODO: record invocation metadata in state map
 
                         // Post-invocation flush: export buffered data from previous invocation
                         if let Err(e) = exporter::export(&config.endpoint, &mut buffer).await {
-                            eprintln!("flush error: {e}");
+                            error!(error = %e, "flush failed");
                         }
                     }
                     Ok(ExtensionsApiEvent::Shutdown { reason }) => {
-                        eprintln!("shutdown: reason={reason}");
+                        info!(reason, "shutdown");
                         cancel.cancel();
 
                         // Drain any payloads still in the channel
@@ -81,12 +92,12 @@ async fn main() {
                         }
 
                         if let Err(e) = exporter::export(&config.endpoint, &mut buffer).await {
-                            eprintln!("shutdown flush error: {e}");
+                            error!(error = %e, "shutdown flush failed");
                         }
                         break;
                     }
                     Err(e) => {
-                        eprintln!("error: {e}");
+                        error!(error = %e, "extensions API error");
                     }
                 }
             }
@@ -98,12 +109,12 @@ async fn main() {
             Some(event) = telemetry_rx.recv() => {
                 match event {
                     TelemetryEvent::RuntimeDone { request_id, status } => {
-                        eprintln!("runtimeDone: requestId={request_id} status={status}");
+                        info!(request_id, status, "runtimeDone");
                         // TODO: update invocation state map, emit timeout log record
                     }
                     TelemetryEvent::Start { request_id, tracing_value } => {
                         let _tracing_value = tracing_value;
-                        eprintln!("start: requestId={request_id}");
+                        info!(request_id, "start");
                         // TODO: extract X-Ray trace ID, store in state map
                     }
                 }
