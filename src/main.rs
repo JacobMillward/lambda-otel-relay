@@ -87,8 +87,6 @@ async fn main() {
         telemetry_cancel,
     ));
 
-    // TODO: Subscribe to Lambda Telemetry API
-
     // Event loop — multiplexes extensions API, OTLP payloads, and telemetry events
     loop {
         tokio::select! {
