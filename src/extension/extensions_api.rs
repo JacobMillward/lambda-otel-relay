@@ -15,6 +15,8 @@ pub enum ApiError {
     MissingExtensionId,
     #[error("unknown event type: {0}")]
     UnknownExtensionsApiEventType(String),
+    #[error("telemetry API registration failed: HTTP {status} — {body}")]
+    TelemetryRegistrationFailed { status: u16, body: String },
 }
 
 #[derive(DeJson)]
@@ -45,17 +47,17 @@ pub enum ExtensionsApiEvent {
 #[derive(Debug)]
 pub struct ExtensionApiClient {
     client: reqwest::Client,
-    base_url: String,
+    runtime_api: String,
     ext_id: String,
 }
 
 impl ExtensionApiClient {
     pub async fn register(runtime_api: &str) -> Result<Self, ApiError> {
         let client = reqwest::Client::new();
-        let base_url = format!("http://{runtime_api}/2020-01-01/extension");
+        let extensions_url = format!("http://{runtime_api}/2020-01-01/extension");
 
         let resp = client
-            .post(format!("{base_url}/register"))
+            .post(format!("{extensions_url}/register"))
             .header("Lambda-Extension-Name", EXTENSION_NAME)
             .body(r#"{"events":["INVOKE","SHUTDOWN"]}"#)
             .send()
@@ -80,15 +82,47 @@ impl ExtensionApiClient {
 
         Ok(Self {
             client,
-            base_url,
+            runtime_api: runtime_api.to_owned(),
             ext_id,
         })
+    }
+
+    /// Subscribe to the Lambda Telemetry API to receive platform lifecycle events.
+    /// Must be called after the telemetry listener is bound and accepting connections.
+    pub async fn register_telemetry(&self, port: u16) -> Result<(), ApiError> {
+        let url = format!("http://{}/2022-08-01/telemetry", self.runtime_api);
+        let body = format!(
+            r#"{{"schemaVersion":"2022-07-01","types":["platform"],"buffering":{{"timeoutMs":25,"maxBytes":262144,"maxItems":1000}},"destination":{{"protocol":"HTTP","URI":"http://sandbox:{port}"}}}}"#
+        );
+
+        let resp = self
+            .client
+            .put(&url)
+            .header("Lambda-Extension-Identifier", &self.ext_id)
+            .body(body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ApiError::TelemetryRegistrationFailed {
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        tracing::debug!("Subscribed to Lambda Telemetry API on port {port}");
+        Ok(())
     }
 
     pub async fn next_event(&self) -> Result<ExtensionsApiEvent, ApiError> {
         let resp = self
             .client
-            .get(format!("{}/event/next", self.base_url))
+            .get(format!(
+                "http://{}/2020-01-01/extension/event/next",
+                self.runtime_api
+            ))
             .header("Lambda-Extension-Identifier", &self.ext_id)
             .send()
             .await?;

@@ -9,7 +9,9 @@ use buffers::{OutboundBuffer, Signal};
 use bytes::Bytes;
 use extensions_api::{ExtensionApiClient, ExtensionsApiEvent};
 use telemetry_listener::TelemetryEvent;
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
@@ -46,6 +48,26 @@ fn setup_rustls() {
         .expect("failed to install rustls ring provider");
 }
 
+/// Bind the telemetry listener, register with the Telemetry API, then spawn
+/// the server task. Binding first guarantees the port is accepting connections
+/// before Lambda starts delivering events.
+async fn start_telemetry_listener(
+    ext: &ExtensionApiClient,
+    port: u16,
+    tx: mpsc::Sender<TelemetryEvent>,
+    cancel: CancellationToken,
+) -> Result<JoinHandle<()>, extensions_api::ApiError> {
+    let listener = TcpListener::bind(("0.0.0.0", port))
+        .await
+        .expect("failed to bind telemetry listener");
+
+    ext.register_telemetry(port).await?;
+
+    Ok(tokio::spawn(telemetry_listener::serve(
+        listener, tx, cancel,
+    )))
+}
+
 #[tokio::main]
 async fn main() {
     setup_logging();
@@ -79,13 +101,12 @@ async fn main() {
     ));
 
     // Task 2: Telemetry API listener on 0.0.0.0:4319
-    // Receives platform events (platform.runtimeDone, platform.start) from Lambda
+    // Binds the listener, registers with the Telemetry API, then spawns the server
     let telemetry_cancel = cancel.clone();
-    let telemetry_task = tokio::spawn(telemetry_listener::serve(
-        config.telemetry_port,
-        telemetry_tx,
-        telemetry_cancel,
-    ));
+    let telemetry_task =
+        start_telemetry_listener(&ext, config.telemetry_port, telemetry_tx, telemetry_cancel)
+            .await
+            .unwrap_or_else(|e| fatal("failed to register with Telemetry API", &e));
 
     // Event loop — multiplexes extensions API, OTLP payloads, and telemetry events
     loop {
