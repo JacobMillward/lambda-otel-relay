@@ -26,6 +26,14 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # v2.2.1
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-lambda
+        uses: zerj9/setup-cargo-lambda@0e3fc757cbb70387ecba326fd28ab729c2a5ce7a # v0.1.2
+
       - name: Cache dependencies
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 

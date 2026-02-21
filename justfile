@@ -2,7 +2,7 @@ _default:
     @just --list
 
 # Run all CI checks
-ci: fmt lint test
+ci: fmt lint test-all
 
 # Check formatting
 fmt:
