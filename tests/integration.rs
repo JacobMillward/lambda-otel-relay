@@ -127,11 +127,11 @@ async fn extension_registers_and_handles_invoke() {
     );
 
     let logs = container
-        .wait_for_log(LogStream::Stdout("invoke: requestId="))
+        .wait_for_log(LogStream::Stdout("\"message\":\"invoke\""))
         .await;
 
     assert!(
-        logs.contains("registered:"),
+        logs.contains("\"message\":\"registered\""),
         "Extension should have logged successful registration. Logs:\n{logs}"
     );
 }
