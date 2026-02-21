@@ -37,7 +37,7 @@ test:
 
 # Run integration tests (builds mock-rie image first)
 integration-test: build-mock-rie
-    cargo test --test integration -- --nocapture
+    cargo test --test '*' -- --nocapture
 
 # Run all tests
 test-all: test integration-test

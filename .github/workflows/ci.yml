@@ -86,4 +86,4 @@ jobs:
           docker build -t mock-rie:latest -f tests/fixtures/mock-rie/Dockerfile target/mock-rie-context/
 
       - name: Run integration tests
-        run: cargo test --test integration -- --nocapture
+        run: cargo test --test '*' -- --nocapture

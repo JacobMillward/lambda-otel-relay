@@ -1,3 +1,6 @@
-mod container_ext;
+#![allow(unused)]
 
-pub use container_ext::{LogStream, WaitForLog};
+mod container_ext;
+pub mod lambda;
+
+pub use container_ext::{LogStream, WaitForLog, buf_contains, line_matches};
