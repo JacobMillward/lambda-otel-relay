@@ -1,3 +1,5 @@
+#![allow(clippy::question_mark)] // nanoserde DeJson derive
+
 use nanoserde::DeJson;
 use thiserror::Error;
 

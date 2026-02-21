@@ -1,3 +1,5 @@
+#![allow(clippy::question_mark)] // nanoserde DeJson derive
+
 use nanoserde::DeJson;
 
 /// Raw JSON shape for a single element in the Telemetry API batch.
