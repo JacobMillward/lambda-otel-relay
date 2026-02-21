@@ -16,7 +16,8 @@ hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
 http-body-util = "0.1"
 url = "2"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["json"] }
+tracing-subscriber = "0.3"
+tracing-microjson = "0.3"
 
 [profile.release]
 strip = true

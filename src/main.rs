@@ -21,10 +21,10 @@ fn fatal(msg: &str, error: &dyn std::fmt::Display) -> ! {
 }
 
 fn setup_logging() {
-    tracing_subscriber::fmt()
-        .json()
-        .with_writer(std::io::stderr)
-        .with_target(false)
+    use tracing_subscriber::prelude::*;
+
+    tracing_subscriber::registry()
+        .with(tracing_microjson::JsonLayer::new(std::io::stderr).with_target(false))
         .init();
 }
 
