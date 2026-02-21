@@ -71,11 +71,11 @@ impl ExtensionApiClient {
 
         let body = resp.text().await?;
         let reg: RegisterResponse = DeJson::deserialize_json(&body)?;
-        tracing::info!(
+        tracing::debug!(
             function = reg.function_name,
             version = reg.function_version,
             handler = reg.handler,
-            "registered"
+            "Extension registered with Lambda Runtime API"
         );
 
         Ok(Self {

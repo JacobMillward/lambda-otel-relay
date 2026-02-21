@@ -1031,6 +1031,7 @@ dependencies = [
  "nanoserde",
  "reqwest",
  "rustls",
+ "serde_json",
  "testcontainers",
  "thiserror 2.0.18",
  "tokio",

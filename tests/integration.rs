@@ -41,10 +41,6 @@ fn setup() -> TestContext {
 
 /// Start a Lambda RIE container with the extension and bootstrap mounted.
 /// The RIE uses lazy init — extensions only start on the first invocation.
-async fn start_lambda_container(ctx: &TestContext) -> ContainerAsync<GenericImage> {
-    start_lambda_container_with_env(ctx, &[]).await
-}
-
 async fn start_lambda_container_with_env(
     ctx: &TestContext,
     extra_env: &[(&str, &str)],
@@ -118,7 +114,8 @@ fn extension_binary_is_valid_linux_elf() {
 #[tokio::test]
 async fn extension_registers_and_handles_invoke() {
     let ctx = setup();
-    let container = start_lambda_container(&ctx).await;
+    let container =
+        start_lambda_container_with_env(&ctx, &[("LAMBDA_OTEL_RELAY_LOG_LEVEL", "debug")]).await;
 
     let body = invoke_function(&container).await;
     assert!(
@@ -127,11 +124,11 @@ async fn extension_registers_and_handles_invoke() {
     );
 
     let logs = container
-        .wait_for_log(LogStream::Stdout("\"message\":\"invoke\""))
+        .wait_for_log(LogStream::Stdout("Received invoke event"))
         .await;
 
     assert!(
-        logs.contains("\"message\":\"registered\""),
+        logs.contains("Extension registered with Lambda Runtime API"),
         "Extension should have logged successful registration. Logs:\n{logs}"
     );
 }

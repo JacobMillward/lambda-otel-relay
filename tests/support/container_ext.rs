@@ -19,6 +19,22 @@ impl LogStream<'_> {
     }
 }
 
+fn line_matches(line: &str, target: &str) -> bool {
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line)
+        && let Some(msg) = parsed
+            .get("fields")
+            .and_then(|f| f.get("message"))
+            .and_then(|m| m.as_str())
+    {
+        return msg == target;
+    }
+    line.contains(target)
+}
+
+fn buf_contains(buf: &str, target: &str) -> bool {
+    buf.lines().any(|line| line_matches(line.trim(), target))
+}
+
 pub trait WaitForLog {
     /// Stream container logs until the message appears, with a default 10s timeout.
     /// Returns all captured log output on success, panics on timeout.
@@ -51,10 +67,11 @@ impl<I: Image> WaitForLog for ContainerAsync<I> {
                             Ok(0) => break,
                             Ok(_) => {
                                 buf.push_str(&line);
-                                line.clear();
-                                if buf.contains(message) {
+                                if line_matches(line.trim(), message) {
+                                    line.clear();
                                     return buf;
                                 }
+                                line.clear();
                             }
                             Err(e) => panic!("failed to read container logs: {e}"),
                         }
@@ -77,8 +94,11 @@ impl<I: Image> WaitForLog for ContainerAsync<I> {
                                     Ok(0) => stdout_eof = true,
                                     Ok(_) => {
                                         buf.push_str(&stdout_line);
+                                        if line_matches(stdout_line.trim(), message) {
+                                            stdout_line.clear();
+                                            return buf;
+                                        }
                                         stdout_line.clear();
-                                        if buf.contains(message) { return buf; }
                                     }
                                     Err(e) => panic!("failed to read stdout: {e}"),
                                 }
@@ -88,8 +108,11 @@ impl<I: Image> WaitForLog for ContainerAsync<I> {
                                     Ok(0) => stderr_eof = true,
                                     Ok(_) => {
                                         buf.push_str(&stderr_line);
+                                        if line_matches(stderr_line.trim(), message) {
+                                            stderr_line.clear();
+                                            return buf;
+                                        }
                                         stderr_line.clear();
-                                        if buf.contains(message) { return buf; }
                                     }
                                     Err(e) => panic!("failed to read stderr: {e}"),
                                 }
@@ -118,5 +141,46 @@ impl<I: Image> WaitForLog for ContainerAsync<I> {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_matches_json_message_exact() {
+        let line =
+            r#"{"level":"DEBUG","fields":{"message":"Received invoke event","request_id":"abc"}}"#;
+        assert!(line_matches(line, "Received invoke event"));
+    }
+
+    #[test]
+    fn line_matches_json_message_no_match() {
+        let line =
+            r#"{"level":"DEBUG","fields":{"message":"Received invoke event","request_id":"abc"}}"#;
+        assert!(!line_matches(line, "invoke"));
+    }
+
+    #[test]
+    fn line_matches_plain_text_fallback() {
+        assert!(line_matches("some plain log invoke event", "invoke"));
+    }
+
+    #[test]
+    fn line_matches_plain_text_no_match() {
+        assert!(!line_matches("some plain log", "invoke"));
+    }
+
+    #[test]
+    fn buf_contains_finds_json_line() {
+        let buf = "garbage\n{\"level\":\"DEBUG\",\"fields\":{\"message\":\"hello world\"}}\nmore\n";
+        assert!(buf_contains(buf, "hello world"));
+    }
+
+    #[test]
+    fn buf_contains_no_match() {
+        let buf = "garbage\n{\"level\":\"DEBUG\",\"fields\":{\"message\":\"hello\"}}\n";
+        assert!(!buf_contains(buf, "hello world"));
     }
 }

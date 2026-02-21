@@ -11,7 +11,7 @@ use extensions_api::{ExtensionApiClient, ExtensionsApiEvent};
 use telemetry_listener::TelemetryEvent;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{debug, error};
 
 /// Operational init failure — log and exit.
 /// Use `expect` instead for programming invariants (bugs).
@@ -21,9 +21,21 @@ fn fatal(msg: &str, error: &dyn std::fmt::Display) -> ! {
 }
 
 fn setup_logging() {
+    use tracing_subscriber::filter::LevelFilter;
     use tracing_subscriber::prelude::*;
 
+    let level = std::env::var("LAMBDA_OTEL_RELAY_LOG_LEVEL")
+        .ok()
+        .and_then(|val| {
+            val.parse::<LevelFilter>().ok().or_else(|| {
+                eprintln!("invalid LAMBDA_OTEL_RELAY_LOG_LEVEL: {val:?}, defaulting to WARN");
+                None
+            })
+        })
+        .unwrap_or(LevelFilter::WARN);
+
     tracing_subscriber::registry()
+        .with(level)
         .with(tracing_microjson::JsonLayer::new(std::io::stderr).with_target(false))
         .init();
 }
@@ -83,7 +95,7 @@ async fn main() {
             event = ext.next_event() => {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
-                        info!(request_id, "invoke");
+                        debug!(request_id, "Received invoke event");
                         // TODO: record invocation metadata in state map
 
                         // Post-invocation flush: export buffered data from previous invocation
@@ -92,7 +104,7 @@ async fn main() {
                         }
                     }
                     Ok(ExtensionsApiEvent::Shutdown { reason }) => {
-                        info!(reason, "shutdown");
+                        debug!(reason, "Received shutdown event");
                         cancel.cancel();
 
                         // Drain any payloads still in the channel
@@ -119,12 +131,12 @@ async fn main() {
             Some(event) = telemetry_rx.recv() => {
                 match event {
                     TelemetryEvent::RuntimeDone { request_id, status } => {
-                        info!(request_id, status, "runtimeDone");
+                        debug!(request_id, status, "Received runtimeDone event");
                         // TODO: update invocation state map, emit timeout log record
                     }
                     TelemetryEvent::Start { request_id, tracing_value } => {
                         let _tracing_value = tracing_value;
-                        info!(request_id, "start");
+                        debug!(request_id, "Received start event");
                         // TODO: extract X-Ray trace ID, store in state map
                     }
                 }
