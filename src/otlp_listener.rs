@@ -41,11 +41,12 @@ where
         }
     })?;
 
-    let body = req
-        .collect()
-        .await
-        .map(|c| c.to_bytes())
-        .map_err(|_| (StatusCode::BAD_REQUEST, format!("POST {path} — failed to read body")))?;
+    let body = req.collect().await.map(|c| c.to_bytes()).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("POST {path} — failed to read body"),
+        )
+    })?;
 
     Ok((signal, body))
 }
