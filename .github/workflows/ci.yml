@@ -74,5 +74,16 @@ jobs:
       - name: Build extension
         run: cargo lambda build --release --extension
 
+      - name: Build telemetry proxy
+        run: cargo lambda build --release --bin telemetry-proxy
+
+      - name: Build mock-rie image
+        run: |
+          mkdir -p target/mock-rie-context
+          cp target/lambda/telemetry-proxy/bootstrap target/mock-rie-context/telemetry-proxy
+          cp tests/fixtures/mock-rie/ext-wrapper.sh target/mock-rie-context/
+          cp tests/fixtures/mock-rie/entrypoint.sh target/mock-rie-context/
+          docker build -t mock-rie:latest -f tests/fixtures/mock-rie/Dockerfile target/mock-rie-context/
+
       - name: Run integration tests
-        run: cargo test --test integration -- --nocapture
+        run: cargo test --test '*' -- --nocapture

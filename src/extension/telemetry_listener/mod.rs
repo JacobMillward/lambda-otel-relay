@@ -77,16 +77,16 @@ where
     Ok(response(StatusCode::OK))
 }
 
-/// Telemetry API listener on 0.0.0.0:<port>.
+/// Telemetry API listener.
 /// Receives platform events (platform.runtimeDone, platform.start) from the
-/// Lambda platform. Must be bound to 0.0.0.0, not localhost, to be reachable
-/// by the Lambda sandbox.
+/// Lambda platform. The listener must already be bound to 0.0.0.0, not
+/// localhost, to be reachable by the Lambda sandbox.
 /// https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api-reference.html
-pub async fn serve(port: u16, tx: mpsc::Sender<TelemetryEvent>, cancel: CancellationToken) {
-    let listener = TcpListener::bind(("0.0.0.0", port))
-        .await
-        .expect("failed to bind telemetry listener");
-
+pub async fn serve(
+    listener: TcpListener,
+    tx: mpsc::Sender<TelemetryEvent>,
+    cancel: CancellationToken,
+) {
     loop {
         tokio::select! {
             result = listener.accept() => {
