@@ -164,6 +164,9 @@ impl LambdaTest {
 pub struct Harness {
     container: ContainerAsync<GenericImage>,
     scenario_dir: PathBuf,
+    /// Tracks how many invocations have been made. Uses `Cell` so `invoke()` can
+    /// take `&self` (matching `on_invoke(&self)`). `AtomicU32` is a drop-in
+    /// replacement if `Sync` is ever needed.
     invoke_count: std::cell::Cell<u32>,
 }
 
@@ -221,6 +224,11 @@ impl Harness {
     }
 
     /// Stop the container and return all captured logs.
+    ///
+    /// NOTE: This snapshots logs before the container is actually stopped (which
+    /// happens when `Harness` is dropped). Shutdown-specific messages (e.g.
+    /// "Received shutdown event") will not appear in the returned logs. To capture
+    /// those, this method will need to explicitly stop the container before the snapshot.
     #[allow(dead_code)]
     pub async fn shutdown(self) -> Logs {
         let stdout_bytes = self.container.stdout_to_vec().await.unwrap_or_default();
