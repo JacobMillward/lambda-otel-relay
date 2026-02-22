@@ -112,12 +112,10 @@ impl LambdaTest {
             );
 
         // Create a unique temp directory for the scenario file.
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let scenario_dir =
-            std::env::temp_dir().join(format!("lambda-test-{}-{nanos}", std::process::id()));
+            std::env::temp_dir().join(format!("lambda-test-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&scenario_dir).expect("Failed to create scenario dir");
 
         if let Some(scenario) = &self.scenario {
