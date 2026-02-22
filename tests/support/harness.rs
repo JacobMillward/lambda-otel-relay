@@ -9,7 +9,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 use tokio::io::AsyncBufReadExt;
 
-use super::container_ext::{buf_contains, line_matches};
+use super::container_ext::{LogLevel, buf_contains, buf_contains_source, line_matches_source};
 
 // ---------------------------------------------------------------------------
 // Scenario — describes what the test handler does during a single invocation
@@ -206,7 +206,12 @@ impl Harness {
         // Wait for the extension to log "Received invoke event" the Nth time,
         // ensuring it has processed this invocation before we snapshot logs.
         let logs = self
-            .wait_for_nth_occurrence("Received invoke event", expected)
+            .wait_for_nth_occurrence(
+                "Received invoke event",
+                expected,
+                "lambda_otel_relay",
+                Some(LogLevel::Debug),
+            )
             .await;
 
         // Parse handler action results from the response body.
@@ -239,8 +244,15 @@ impl Harness {
         }
     }
 
-    /// Stream both stdout and stderr until the target message has appeared `n` times.
-    async fn wait_for_nth_occurrence(&self, target: &str, n: u32) -> Logs {
+    /// Stream both stdout and stderr until the target message has appeared `n`
+    /// times on **stderr**, filtered by source and optional level.
+    async fn wait_for_nth_occurrence(
+        &self,
+        target: &str,
+        n: u32,
+        source: &str,
+        level: Option<LogLevel>,
+    ) -> Logs {
         let timeout = Duration::from_secs(10);
         let result = tokio::time::timeout(timeout, async {
             let mut stdout_reader = self.container.stdout(true);
@@ -262,12 +274,6 @@ impl Harness {
                             Ok(0) => stdout_eof = true,
                             Ok(_) => {
                                 stdout_buf.push_str(&stdout_line);
-                                if line_matches(stdout_line.trim(), target) {
-                                    count += 1;
-                                    if count >= n {
-                                        return Logs { stdout: stdout_buf, stderr: stderr_buf };
-                                    }
-                                }
                                 stdout_line.clear();
                             }
                             Err(e) => panic!("failed to read stdout: {e}"),
@@ -278,7 +284,7 @@ impl Harness {
                             Ok(0) => stderr_eof = true,
                             Ok(_) => {
                                 stderr_buf.push_str(&stderr_line);
-                                if line_matches(stderr_line.trim(), target) {
+                                if line_matches_source(stderr_line.trim(), target, source, level) {
                                     count += 1;
                                     if count >= n {
                                         return Logs { stdout: stdout_buf, stderr: stderr_buf };
@@ -363,5 +369,10 @@ impl Logs {
     /// JSON-aware message check across both stdout and stderr.
     pub fn contains_message(&self, target: &str) -> bool {
         buf_contains(&self.stdout, target) || buf_contains(&self.stderr, target)
+    }
+
+    /// Check only stderr for messages from a specific source, with optional level filter.
+    pub fn contains_extension_message(&self, target: &str, level: Option<LogLevel>) -> bool {
+        buf_contains_source(&self.stderr, target, "lambda_otel_relay", level)
     }
 }
