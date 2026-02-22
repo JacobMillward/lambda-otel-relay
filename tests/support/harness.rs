@@ -202,12 +202,9 @@ impl Harness {
 
         // Wait for the extension to log "Received invoke event" the Nth time,
         // ensuring it has processed this invocation before we snapshot logs.
-        let stdout = self
+        let logs = self
             .wait_for_nth_occurrence("Received invoke event", expected)
             .await;
-
-        let stderr_bytes = self.container.stderr_to_vec().await.unwrap_or_default();
-        let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
 
         // Parse handler action results from the response body.
         let results: Vec<ActionResult> = serde_json::from_str::<serde_json::Value>(&body)
@@ -219,7 +216,7 @@ impl Harness {
         InvokeResult {
             body,
             results,
-            logs: Logs { stdout, stderr },
+            logs,
         }
     }
 
@@ -234,32 +231,62 @@ impl Harness {
         }
     }
 
-    /// Stream stdout until the target message has appeared `n` times.
-    async fn wait_for_nth_occurrence(&self, target: &str, n: u32) -> String {
+    /// Stream both stdout and stderr until the target message has appeared `n` times.
+    async fn wait_for_nth_occurrence(&self, target: &str, n: u32) -> Logs {
         let timeout = Duration::from_secs(10);
         let result = tokio::time::timeout(timeout, async {
-            let mut reader = self.container.stdout(true);
-            let mut buf = String::new();
-            let mut line = String::new();
+            let mut stdout_reader = self.container.stdout(true);
+            let mut stderr_reader = self.container.stderr(true);
+            let mut stdout_buf = String::new();
+            let mut stderr_buf = String::new();
+            let mut stdout_line = String::new();
+            let mut stderr_line = String::new();
+            let mut stdout_eof = false;
+            let mut stderr_eof = false;
             let mut count = 0u32;
             loop {
-                match reader.read_line(&mut line).await {
-                    Ok(0) => break,
-                    Ok(_) => {
-                        buf.push_str(&line);
-                        if line_matches(line.trim(), target) {
-                            count += 1;
-                            if count >= n {
-                                line.clear();
-                                return buf;
+                if stdout_eof && stderr_eof {
+                    break;
+                }
+                tokio::select! {
+                    result = stdout_reader.read_line(&mut stdout_line), if !stdout_eof => {
+                        match result {
+                            Ok(0) => stdout_eof = true,
+                            Ok(_) => {
+                                stdout_buf.push_str(&stdout_line);
+                                if line_matches(stdout_line.trim(), target) {
+                                    count += 1;
+                                    if count >= n {
+                                        return Logs { stdout: stdout_buf, stderr: stderr_buf };
+                                    }
+                                }
+                                stdout_line.clear();
                             }
+                            Err(e) => panic!("failed to read stdout: {e}"),
                         }
-                        line.clear();
                     }
-                    Err(e) => panic!("failed to read container logs: {e}"),
+                    result = stderr_reader.read_line(&mut stderr_line), if !stderr_eof => {
+                        match result {
+                            Ok(0) => stderr_eof = true,
+                            Ok(_) => {
+                                stderr_buf.push_str(&stderr_line);
+                                if line_matches(stderr_line.trim(), target) {
+                                    count += 1;
+                                    if count >= n {
+                                        return Logs { stdout: stdout_buf, stderr: stderr_buf };
+                                    }
+                                }
+                                stderr_line.clear();
+                            }
+                            Err(e) => panic!("failed to read stderr: {e}"),
+                        }
+                    }
                 }
             }
-            buf
+            Logs {
+                stdout: stdout_buf,
+                stderr: stderr_buf,
+            }
         })
         .await;
 
