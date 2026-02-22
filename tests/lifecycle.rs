@@ -15,14 +15,16 @@ async fn extension_registers_and_handles_invoke() {
     assert!(
         result
             .logs
-            .contains_message("Extension registered with Lambda Runtime API"),
+            .contains_extension_message("Extension registered with Lambda Runtime API", None),
         "Extension should have logged successful registration. Logs:\n{}",
-        result.logs.stdout
+        result.logs.stderr
     );
     assert!(
-        result.logs.contains_message("Received invoke event"),
+        result
+            .logs
+            .contains_extension_message("Received invoke event", None),
         "Extension should have logged invoke event. Logs:\n{}",
-        result.logs.stdout
+        result.logs.stderr
     );
 }
 
@@ -34,8 +36,8 @@ async fn extension_registers_with_telemetry_api() {
     assert!(
         result
             .logs
-            .contains_message("Subscribed to Lambda Telemetry API on port 4319"),
+            .contains_extension_message("Subscribed to Lambda Telemetry API on port 4319", None),
         "Extension should have logged telemetry subscription. Logs:\n{}",
-        result.logs.stdout
+        result.logs.stderr
     );
 }
