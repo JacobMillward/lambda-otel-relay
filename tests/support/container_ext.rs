@@ -19,6 +19,7 @@ impl LogLevel {
     }
 }
 
+/// Checks if a log line matches the given source and message, and optionally log level.
 pub fn line_matches_source(
     line: &str,
     target_msg: &str,
@@ -46,6 +47,7 @@ pub fn line_matches_source(
     msg_matches && source_matches && level_matches
 }
 
+/// Checks if any line in the buffer matches the given source and message, and optionally log level.
 pub fn buf_contains_source(
     buf: &str,
     target_msg: &str,
