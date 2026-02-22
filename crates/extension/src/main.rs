@@ -38,7 +38,7 @@ fn setup_logging() {
 
     tracing_subscriber::registry()
         .with(level)
-        .with(tracing_microjson::JsonLayer::new(std::io::stderr).with_target(false))
+        .with(tracing_microjson::JsonLayer::new(std::io::stderr).with_target(true))
         .init();
 }
 
