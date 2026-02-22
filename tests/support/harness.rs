@@ -247,7 +247,7 @@ impl Harness {
     }
 
     /// Stream both stdout and stderr until the target message has appeared `n`
-    /// times on **stderr**, filtered by source and optional level.
+    /// times (on either stream), filtered by source and optional level.
     async fn wait_for_nth_occurrence(
         &self,
         target: &str,
@@ -276,6 +276,12 @@ impl Harness {
                             Ok(0) => stdout_eof = true,
                             Ok(_) => {
                                 stdout_buf.push_str(&stdout_line);
+                                if line_matches_source(stdout_line.trim(), target, source, level) {
+                                    count += 1;
+                                    if count >= n {
+                                        return Logs { stdout: stdout_buf, stderr: stderr_buf };
+                                    }
+                                }
                                 stdout_line.clear();
                             }
                             Err(e) => panic!("failed to read stdout: {e}"),
@@ -368,8 +374,11 @@ pub struct Logs {
 }
 
 impl Logs {
-    /// Check only stderr for messages from a specific source, with optional level filter.
+    /// Check both streams for messages from the extension, filtered by optional level.
+    /// The RIE forwards subprocess output to the container's stdout, so extension
+    /// logs may appear on either stream depending on the runtime environment.
     pub fn contains_extension_message(&self, target: &str, level: Option<LogLevel>) -> bool {
-        buf_contains_source(&self.stderr, target, EXTENSION_LOG_TARGET, level)
+        buf_contains_source(&self.stdout, target, EXTENSION_LOG_TARGET, level)
+            || buf_contains_source(&self.stderr, target, EXTENSION_LOG_TARGET, level)
     }
 }
