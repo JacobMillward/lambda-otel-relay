@@ -1,6 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 #[derive(Deserialize)]
 struct Scenario {
@@ -23,8 +24,20 @@ struct ActionResult {
     status: Option<u16>,
 }
 
+fn setup_logging() {
+    use tracing_subscriber::filter::LevelFilter;
+    use tracing_subscriber::prelude::*;
+
+    tracing_subscriber::registry()
+        .with(LevelFilter::DEBUG)
+        .with(tracing_microjson::JsonLayer::new(std::io::stdout).with_target(true))
+        .init();
+}
+
 #[tokio::main]
 async fn main() {
+    setup_logging();
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("failed to install rustls ring provider");
@@ -49,6 +62,8 @@ async fn main() {
             .unwrap()
             .to_string();
 
+        debug!(request_id = %request_id, "Received invocation");
+
         // 2. Read scenario (missing or invalid file = no-op)
         let scenario: Scenario = std::fs::read_to_string("/tmp/scenario/scenario.json")
             .ok()
@@ -60,6 +75,7 @@ async fn main() {
         for action in &scenario.actions {
             match action {
                 Action::PostOtlp { path, body } => {
+                    debug!(action = "post_otlp", path = %path, "Executing action");
                     let decoded = BASE64.decode(body).unwrap_or_default();
                     let status = client
                         .post(format!("http://localhost:4318{path}"))
@@ -83,6 +99,9 @@ async fn main() {
             "statusCode": 200,
             "results": results,
         });
+
+        debug!(request_id = %request_id, "Sending response");
+
         client
             .post(format!(
                 "http://{runtime_api}/2018-06-01/runtime/invocation/{request_id}/response"
