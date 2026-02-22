@@ -11,42 +11,9 @@ use tokio::io::AsyncBufReadExt;
 
 use super::container_ext::{LogLevel, buf_contains_source, line_matches_source};
 
+use test_handler::{Scenario, Action};
+
 const EXTENSION_LOG_TARGET: &str = "lambda_otel_relay";
-
-// ---------------------------------------------------------------------------
-// Scenario — describes what the test handler does during a single invocation
-// ---------------------------------------------------------------------------
-
-#[derive(Serialize)]
-pub struct Scenario {
-    actions: Vec<Action>,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type")]
-enum Action {
-    #[serde(rename = "post_otlp")]
-    PostOtlp { path: String, body: String },
-}
-
-impl Scenario {
-    pub fn new() -> Self {
-        Self { actions: vec![] }
-    }
-
-    /// The handler will POST to the extension's OTLP listener at the given path.
-    pub fn post_otlp(mut self, path: &str, body: &[u8]) -> Self {
-        self.actions.push(Action::PostOtlp {
-            path: path.into(),
-            body: BASE64.encode(body),
-        });
-        self
-    }
-
-    fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap()
-    }
-}
 
 // ---------------------------------------------------------------------------
 // LambdaTest — builder that configures the environment and starts a container

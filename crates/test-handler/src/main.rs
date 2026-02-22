@@ -1,28 +1,8 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-#[derive(Deserialize)]
-struct Scenario {
-    actions: Vec<Action>,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type")]
-enum Action {
-    #[serde(rename = "post_otlp")]
-    PostOtlp { path: String, body: String },
-}
-
-#[derive(Serialize)]
-struct ActionResult {
-    action: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    status: Option<u16>,
-}
+use test_handler::{Scenario, Action, ActionResult};
 
 fn setup_logging() {
     use tracing_subscriber::filter::LevelFilter;

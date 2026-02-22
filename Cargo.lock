@@ -966,6 +966,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "test-handler",
  "testcontainers",
  "tokio",
 ]
