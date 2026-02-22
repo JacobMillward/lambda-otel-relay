@@ -38,7 +38,7 @@ pub fn line_matches_source(
     let source_matches = parsed
         .get("target")
         .and_then(|t| t.as_str())
-        .is_some_and(|t| t.starts_with(source));
+        .is_some_and(|t| t == source || t.starts_with(&format!("{source}::")));
 
     let level_matches =
         level.is_none_or(|lvl| parsed.get("level").and_then(|l| l.as_str()) == Some(lvl.as_str()));

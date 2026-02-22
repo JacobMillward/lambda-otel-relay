@@ -47,6 +47,18 @@ fn line_matches_source_non_json() {
 }
 
 #[test]
+fn line_matches_source_missing_target_field() {
+    let line =
+        r#"{"level":"DEBUG","fields":{"message":"Received invoke event","request_id":"abc"}}"#;
+    assert!(!line_matches_source(
+        line,
+        "Received invoke event",
+        "lambda_otel_relay",
+        Some(LogLevel::Debug),
+    ));
+}
+
+#[test]
 fn line_matches_source_no_level_filter() {
     let line = r#"{"level":"WARN","fields":{"message":"something happened"},"target":"lambda_otel_relay"}"#;
     assert!(line_matches_source(
