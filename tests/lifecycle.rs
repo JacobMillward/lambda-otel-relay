@@ -13,7 +13,9 @@ async fn extension_registers_and_handles_invoke() {
         result.body
     );
     assert!(
-        result.logs.contains_message("Extension registered with Lambda Runtime API"),
+        result
+            .logs
+            .contains_message("Extension registered with Lambda Runtime API"),
         "Extension should have logged successful registration. Logs:\n{}",
         result.logs.stdout
     );
@@ -30,7 +32,9 @@ async fn extension_registers_with_telemetry_api() {
 
     let result = harness.invoke().await;
     assert!(
-        result.logs.contains_message("Subscribed to Lambda Telemetry API on port 4319"),
+        result
+            .logs
+            .contains_message("Subscribed to Lambda Telemetry API on port 4319"),
         "Extension should have logged telemetry subscription. Logs:\n{}",
         result.logs.stdout
     );

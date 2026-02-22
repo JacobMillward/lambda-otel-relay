@@ -1,0 +1,17 @@
+[package]
+name = "telemetry-proxy"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "telemetry-proxy"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }

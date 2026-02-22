@@ -958,6 +958,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration-tests"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "testcontainers",
+ "tokio",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1024,7 +1037,6 @@ dependencies = [
 name = "lambda-otel-relay"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "bytes",
  "http-body-util",
  "hyper",
@@ -1032,9 +1044,6 @@ dependencies = [
  "nanoserde",
  "reqwest",
  "rustls",
- "serde",
- "serde_json",
- "testcontainers",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -1914,6 +1923,31 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "telemetry-proxy"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "reqwest",
+ "rustls",
+ "tokio",
+]
+
+[[package]]
+name = "test-handler"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

@@ -1,45 +1,26 @@
-[package]
-name = "lambda-otel-relay"
-version = "0.1.0"
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
 edition = "2024"
 
-[[bin]]
-name = "lambda-otel-relay"
-path = "src/extension/main.rs"
-
-[[bin]]
-name = "telemetry-proxy"
-path = "src/telemetry_proxy/main.rs"
-
-[[bin]]
-name = "test-handler"
-path = "src/test_handler/main.rs"
-
-[dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "gzip"] }
-rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"]}
-nanoserde = { version = "0.2", features = ["std", "json"] }
-thiserror = "2.0.18"
-tokio-util = { version = "0.7", features = ["rt"] }
-bytes = "1"
-hyper = { version = "1", features = ["http1", "http2", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
-http-body-util = "0.1"
-url = "2"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-tracing-microjson = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-base64 = "0.22"
+# The root package exists solely for integration tests.
+# It has no src — only tests/ and dev-dependencies.
+[package]
+name = "integration-tests"
+version = "0.0.0"
+edition.workspace = true
+publish = false
 
 [dev-dependencies]
 testcontainers = "0.27"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 
 [profile.release]
 strip = true

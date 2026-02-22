@@ -66,8 +66,7 @@ impl LambdaTest {
     /// Override the extension's log level (default: debug).
     #[allow(dead_code)]
     pub fn log_level(mut self, level: &str) -> Self {
-        self.env
-            .retain(|(k, _)| k != "LAMBDA_OTEL_RELAY_LOG_LEVEL");
+        self.env.retain(|(k, _)| k != "LAMBDA_OTEL_RELAY_LOG_LEVEL");
         self.env
             .push(("LAMBDA_OTEL_RELAY_LOG_LEVEL".into(), level.into()));
         self
@@ -124,9 +123,7 @@ impl LambdaTest {
 
         let mut image = GenericImage::new("mock-rie", "latest")
             .with_exposed_port(8080.tcp())
-            .with_wait_for(WaitFor::message_on_stderr(
-                "exec '/var/runtime/bootstrap'",
-            ))
+            .with_wait_for(WaitFor::message_on_stderr("exec '/var/runtime/bootstrap'"))
             .with_mount(testcontainers::core::Mount::bind_mount(
                 extension_path.to_str().unwrap(),
                 "/opt/lambda-otel-relay-bin",
@@ -175,11 +172,7 @@ impl Harness {
     #[allow(dead_code)]
     pub fn on_invoke(&self, f: impl FnOnce(Scenario) -> Scenario) -> &Self {
         let scenario = f(Scenario::new());
-        std::fs::write(
-            self.scenario_dir.join("scenario.json"),
-            scenario.to_json(),
-        )
-        .unwrap();
+        std::fs::write(self.scenario_dir.join("scenario.json"), scenario.to_json()).unwrap();
         self
     }
 

@@ -12,21 +12,21 @@ fmt:
 
 # Lint with clippy
 lint:
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Build the extension binary for Linux (matches host architecture for Docker tests)
 build-extension:
-    cargo lambda build --release --extension {{ arch_flag }}
+    cargo lambda build --release -p lambda-otel-relay --extension {{ arch_flag }}
 
 # Build the test handler binary for Linux
 build-test-handler:
-    cargo lambda build --release --bin test-handler {{ arch_flag }}
+    cargo lambda build --release -p test-handler {{ arch_flag }}
 
 # Build mock-rie Docker image (proxy + wrapper scripts baked in)
 build-mock-rie: build-extension build-test-handler
     #!/usr/bin/env bash
     # Not a Lambda, but cargo-lambda is a convenient cross-compiler (via Zig) for Linux
-    cargo lambda build --release --bin telemetry-proxy {{ arch_flag }}
+    cargo lambda build --release -p telemetry-proxy {{ arch_flag }}
 
     # Copy the proxy binary and wrapper scripts into a temp context directory for Docker
     mkdir -p target/mock-rie-context
@@ -37,7 +37,7 @@ build-mock-rie: build-extension build-test-handler
 
 # Run unit tests
 test:
-    cargo test --bin lambda-otel-relay
+    cargo test -p lambda-otel-relay
 
 # Run integration tests (builds mock-rie image first)
 integration-test: build-mock-rie

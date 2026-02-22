@@ -43,10 +43,10 @@ jobs:
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run unit tests
-        run: cargo test --bin lambda-otel-relay
+        run: cargo test -p lambda-otel-relay
 
   integration-test:
     name: Integration Tests
@@ -72,13 +72,13 @@ jobs:
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
       - name: Build extension
-        run: cargo lambda build --release --extension
+        run: cargo lambda build --release -p lambda-otel-relay --extension
 
       - name: Build telemetry proxy
-        run: cargo lambda build --release --bin telemetry-proxy
+        run: cargo lambda build --release -p telemetry-proxy
 
       - name: Build test handler
-        run: cargo lambda build --release --bin test-handler
+        run: cargo lambda build --release -p test-handler
 
       - name: Build mock-rie image
         run: |
