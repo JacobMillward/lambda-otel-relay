@@ -18,8 +18,12 @@ lint:
 build-extension:
     cargo lambda build --release --extension {{ arch_flag }}
 
+# Build the test handler binary for Linux
+build-test-handler:
+    cargo lambda build --release --bin test-handler {{ arch_flag }}
+
 # Build mock-rie Docker image (proxy + wrapper scripts baked in)
-build-mock-rie: build-extension
+build-mock-rie: build-extension build-test-handler
     #!/usr/bin/env bash
     # Not a Lambda, but cargo-lambda is a convenient cross-compiler (via Zig) for Linux
     cargo lambda build --release --bin telemetry-proxy {{ arch_flag }}

@@ -77,6 +77,9 @@ jobs:
       - name: Build telemetry proxy
         run: cargo lambda build --release --bin telemetry-proxy
 
+      - name: Build test handler
+        run: cargo lambda build --release --bin test-handler
+
       - name: Build mock-rie image
         run: |
           mkdir -p target/mock-rie-context
