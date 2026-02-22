@@ -57,10 +57,7 @@ pub fn line_matches_source(
         .is_some_and(|t| t.starts_with(source));
 
     let level_matches = level.map_or(true, |lvl| {
-        parsed
-            .get("level")
-            .and_then(|l| l.as_str())
-            == Some(lvl.as_str())
+        parsed.get("level").and_then(|l| l.as_str()) == Some(lvl.as_str())
     });
 
     msg_matches && source_matches && level_matches

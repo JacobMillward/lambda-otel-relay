@@ -64,7 +64,8 @@ fn line_matches_source_wrong_target() {
 
 #[test]
 fn line_matches_source_wrong_message() {
-    let line = r#"{"level":"DEBUG","fields":{"message":"Something else"},"target":"lambda_otel_relay"}"#;
+    let line =
+        r#"{"level":"DEBUG","fields":{"message":"Something else"},"target":"lambda_otel_relay"}"#;
     assert!(!line_matches_source(
         line,
         "Received invoke event",
@@ -107,7 +108,8 @@ fn line_matches_source_wrong_level() {
 
 #[test]
 fn line_matches_source_target_prefix() {
-    let line = r#"{"level":"DEBUG","fields":{"message":"detail"},"target":"lambda_otel_relay::exporter"}"#;
+    let line =
+        r#"{"level":"DEBUG","fields":{"message":"detail"},"target":"lambda_otel_relay::exporter"}"#;
     assert!(line_matches_source(
         line,
         "detail",
