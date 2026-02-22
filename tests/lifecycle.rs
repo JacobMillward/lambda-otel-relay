@@ -1,46 +1,37 @@
 mod support;
 
-use support::lambda::{invoke_function, setup, start_lambda_container_with_env};
-use support::{LogStream, WaitForLog};
+use support::harness::LambdaTest;
 
 #[tokio::test]
 async fn extension_registers_and_handles_invoke() {
-    let ctx = setup();
-    let container =
-        start_lambda_container_with_env(&ctx, &[("LAMBDA_OTEL_RELAY_LOG_LEVEL", "debug")]).await;
+    let harness = LambdaTest::new().start().await;
 
-    let body = invoke_function(&container).await;
+    let result = harness.invoke().await;
     assert!(
-        body.contains("statusCode"),
-        "Lambda invoke should return handler response. Body: {body}"
+        result.body.contains("statusCode"),
+        "Lambda invoke should return handler response. Body: {}",
+        result.body
     );
-
-    let logs = container
-        .wait_for_log(LogStream::Stdout("Received invoke event"))
-        .await;
-
     assert!(
-        logs.contains("Extension registered with Lambda Runtime API"),
-        "Extension should have logged successful registration. Logs:\n{logs}"
+        result.logs.contains_message("Extension registered with Lambda Runtime API"),
+        "Extension should have logged successful registration. Logs:\n{}",
+        result.logs.stdout
+    );
+    assert!(
+        result.logs.contains_message("Received invoke event"),
+        "Extension should have logged invoke event. Logs:\n{}",
+        result.logs.stdout
     );
 }
 
 #[tokio::test]
 async fn extension_registers_with_telemetry_api() {
-    let ctx = setup();
-    let container =
-        start_lambda_container_with_env(&ctx, &[("LAMBDA_OTEL_RELAY_LOG_LEVEL", "debug")]).await;
+    let harness = LambdaTest::new().start().await;
 
-    invoke_function(&container).await;
-
-    let logs = container
-        .wait_for_log(LogStream::Stdout(
-            "Subscribed to Lambda Telemetry API on port 4319",
-        ))
-        .await;
-
+    let result = harness.invoke().await;
     assert!(
-        logs.contains("Subscribed to Lambda Telemetry API"),
-        "Extension should have logged telemetry subscription. Logs:\n{logs}"
+        result.logs.contains_message("Subscribed to Lambda Telemetry API on port 4319"),
+        "Extension should have logged telemetry subscription. Logs:\n{}",
+        result.logs.stdout
     );
 }
