@@ -9,7 +9,9 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 use tokio::io::AsyncBufReadExt;
 
-use super::container_ext::{LogLevel, buf_contains, buf_contains_source, line_matches_source};
+use super::container_ext::{LogLevel, buf_contains_source, line_matches_source};
+
+const EXTENSION_LOG_TARGET: &str = "lambda_otel_relay";
 
 // ---------------------------------------------------------------------------
 // Scenario — describes what the test handler does during a single invocation
@@ -209,7 +211,7 @@ impl Harness {
             .wait_for_nth_occurrence(
                 "Received invoke event",
                 expected,
-                "lambda_otel_relay",
+                EXTENSION_LOG_TARGET,
                 Some(LogLevel::Debug),
             )
             .await;
@@ -366,13 +368,8 @@ pub struct Logs {
 }
 
 impl Logs {
-    /// JSON-aware message check across both stdout and stderr.
-    pub fn contains_message(&self, target: &str) -> bool {
-        buf_contains(&self.stdout, target) || buf_contains(&self.stderr, target)
-    }
-
     /// Check only stderr for messages from a specific source, with optional level filter.
     pub fn contains_extension_message(&self, target: &str, level: Option<LogLevel>) -> bool {
-        buf_contains_source(&self.stderr, target, "lambda_otel_relay", level)
+        buf_contains_source(&self.stderr, target, EXTENSION_LOG_TARGET, level)
     }
 }
