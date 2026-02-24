@@ -41,13 +41,12 @@ async fn main() {
             .to_str()
             .unwrap()
             .to_string();
-
         debug!(request_id = %request_id, "Received invocation");
 
-        // 2. Read scenario (missing or invalid file = no-op)
-        let scenario: Scenario = std::fs::read_to_string("/tmp/scenario/scenario.json")
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+        // 2. Read scenario from event payload (invalid/empty = no-op)
+        let scenario: Scenario = resp
+            .json()
+            .await
             .unwrap_or(Scenario { actions: vec![] });
 
         // 3. Execute actions sequentially

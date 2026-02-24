@@ -8,7 +8,8 @@ use tokio::io::AsyncBufReadExt;
 
 use super::container_ext::{LogLevel, buf_contains_source, line_matches_source};
 
-use test_handler::{ActionResult, Scenario};
+pub use test_handler::Scenario;
+use test_handler::ActionResult;
 
 const EXTENSION_LOG_TARGET: &str = "lambda_otel_relay";
 
@@ -18,14 +19,12 @@ const EXTENSION_LOG_TARGET: &str = "lambda_otel_relay";
 
 pub struct LambdaTest {
     env: Vec<(String, String)>,
-    scenario: Option<Scenario>,
 }
 
 impl LambdaTest {
     pub fn new() -> Self {
         Self {
             env: vec![("LAMBDA_OTEL_RELAY_LOG_LEVEL".into(), "debug".into())],
-            scenario: None,
         }
     }
 
@@ -42,13 +41,6 @@ impl LambdaTest {
     #[allow(dead_code)]
     pub fn env(mut self, key: &str, value: &str) -> Self {
         self.env.push((key.into(), value.into()));
-        self
-    }
-
-    /// Configure what the handler does on the first invocation.
-    /// The closure receives a fresh `Scenario` builder.
-    pub fn on_invoke(mut self, f: impl FnOnce(Scenario) -> Scenario) -> Self {
-        self.scenario = Some(f(Scenario::new()));
         self
     }
 
@@ -76,17 +68,6 @@ impl LambdaTest {
                 "Test handler binary not found. Run `cargo lambda build --release --bin test-handler` first.",
             );
 
-        // Create a unique temp directory for the scenario file.
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let scenario_dir =
-            std::env::temp_dir().join(format!("lambda-test-{}-{id}", std::process::id()));
-        std::fs::create_dir_all(&scenario_dir).expect("Failed to create scenario dir");
-
-        if let Some(scenario) = &self.scenario {
-            std::fs::write(scenario_dir.join("scenario.json"), scenario.to_json()).unwrap();
-        }
-
         let mut image = GenericImage::new("mock-rie", "latest")
             .with_exposed_port(8080.tcp())
             .with_wait_for(WaitFor::message_on_stderr("exec '/var/runtime/bootstrap'"))
@@ -97,10 +78,6 @@ impl LambdaTest {
             .with_mount(testcontainers::core::Mount::bind_mount(
                 handler_path.to_str().unwrap(),
                 "/var/runtime/bootstrap",
-            ))
-            .with_mount(testcontainers::core::Mount::bind_mount(
-                scenario_dir.to_str().unwrap(),
-                "/tmp/scenario",
             ))
             .with_cmd(["bootstrap"])
             .with_startup_timeout(Duration::from_secs(30))
@@ -117,7 +94,6 @@ impl LambdaTest {
 
         Harness {
             container,
-            scenario_dir,
             invoke_count: std::cell::Cell::new(0),
         }
     }
@@ -129,24 +105,15 @@ impl LambdaTest {
 
 pub struct Harness {
     container: ContainerAsync<GenericImage>,
-    scenario_dir: PathBuf,
-    /// Tracks how many invocations have been made. Uses `Cell` so `invoke()` can
-    /// take `&self` (matching `on_invoke(&self)`). `AtomicU32` is a drop-in
-    /// replacement if `Sync` is ever needed.
+    /// Tracks how many invocations have been made. Uses `Cell` so `invoke()`
+    /// can take `&self`. `AtomicU32` is a drop-in replacement if `Sync` is
+    /// ever needed.
     invoke_count: std::cell::Cell<u32>,
 }
 
 impl Harness {
-    /// Reconfigure what the handler does on the next invocation.
-    #[allow(dead_code)]
-    pub fn on_invoke(&self, f: impl FnOnce(Scenario) -> Scenario) -> &Self {
-        let scenario = f(Scenario::new());
-        std::fs::write(self.scenario_dir.join("scenario.json"), scenario.to_json()).unwrap();
-        self
-    }
-
-    /// Invoke the Lambda function and return structured results.
-    pub async fn invoke(&self) -> InvokeResult {
+    /// Invoke the Lambda function with the given scenario and return structured results.
+    pub async fn invoke(&self, scenario: Scenario) -> InvokeResult {
         self.invoke_count.set(self.invoke_count.get() + 1);
         let expected = self.invoke_count.get();
 
@@ -162,7 +129,7 @@ impl Harness {
                 "http://127.0.0.1:{host_port}/2015-03-31/functions/function/invocations"
             ))
             .header("Content-Type", "application/json")
-            .body("{}")
+            .body(scenario.to_json())
             .send()
             .await
             .expect("Failed to invoke Lambda function");
@@ -291,12 +258,6 @@ impl Harness {
                 );
             }
         }
-    }
-}
-
-impl Drop for Harness {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.scenario_dir);
     }
 }
 

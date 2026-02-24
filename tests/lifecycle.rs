@@ -1,12 +1,12 @@
 mod support;
 
-use support::harness::LambdaTest;
+use support::harness::{LambdaTest, Scenario};
 
 #[tokio::test]
 async fn extension_registers_and_handles_invoke() {
     let harness = LambdaTest::new().start().await;
 
-    let result = harness.invoke().await;
+    let result = harness.invoke(Scenario::new()).await;
     assert!(
         result.body.contains("statusCode"),
         "Lambda invoke should return handler response. Body: {}",
@@ -32,7 +32,7 @@ async fn extension_registers_and_handles_invoke() {
 async fn extension_registers_with_telemetry_api() {
     let harness = LambdaTest::new().start().await;
 
-    let result = harness.invoke().await;
+    let result = harness.invoke(Scenario::new()).await;
     assert!(
         result
             .logs

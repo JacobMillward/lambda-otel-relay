@@ -1,15 +1,14 @@
 mod support;
 
-use support::harness::LambdaTest;
+use support::harness::{LambdaTest, Scenario};
 
 #[tokio::test]
 async fn extension_returns_200_v1_traces() {
-    let harness = LambdaTest::new()
-        .on_invoke(|s| s.post_otlp("/v1/traces", b"test-payload"))
-        .start()
-        .await;
+    let harness = LambdaTest::new().start().await;
 
-    let result = harness.invoke().await;
+    let result = harness
+        .invoke(Scenario::new().post_otlp("/v1/traces", b"test-payload"))
+        .await;
     assert_eq!(
         result.otlp_status("/v1/traces"),
         200,
@@ -20,12 +19,11 @@ async fn extension_returns_200_v1_traces() {
 
 #[tokio::test]
 async fn extension_returns_200_v1_metrics() {
-    let harness = LambdaTest::new()
-        .on_invoke(|s| s.post_otlp("/v1/metrics", b"test-payload"))
-        .start()
-        .await;
+    let harness = LambdaTest::new().start().await;
 
-    let result = harness.invoke().await;
+    let result = harness
+        .invoke(Scenario::new().post_otlp("/v1/metrics", b"test-payload"))
+        .await;
     assert_eq!(
         result.otlp_status("/v1/metrics"),
         200,
@@ -36,12 +34,11 @@ async fn extension_returns_200_v1_metrics() {
 
 #[tokio::test]
 async fn extension_returns_200_v1_logs() {
-    let harness = LambdaTest::new()
-        .on_invoke(|s| s.post_otlp("/v1/logs", b"test-payload"))
-        .start()
-        .await;
+    let harness = LambdaTest::new().start().await;
 
-    let result = harness.invoke().await;
+    let result = harness
+        .invoke(Scenario::new().post_otlp("/v1/logs", b"test-payload"))
+        .await;
     assert_eq!(
         result.otlp_status("/v1/logs"),
         200,
