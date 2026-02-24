@@ -1,9 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use serde::{Deserialize, Serialize};
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
@@ -11,7 +8,7 @@ use tokio::io::AsyncBufReadExt;
 
 use super::container_ext::{LogLevel, buf_contains_source, line_matches_source};
 
-use test_handler::{Scenario, Action};
+use test_handler::{ActionResult, Scenario};
 
 const EXTENSION_LOG_TARGET: &str = "lambda_otel_relay";
 
@@ -311,13 +308,6 @@ pub struct InvokeResult {
     pub body: String,
     pub logs: Logs,
     results: Vec<ActionResult>,
-}
-
-#[derive(Deserialize, Default)]
-struct ActionResult {
-    action: String,
-    path: Option<String>,
-    status: Option<u16>,
 }
 
 impl InvokeResult {
