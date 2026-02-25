@@ -2,13 +2,13 @@ use bytes::Bytes;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, ReusableBoxFuture};
 use tracing::{debug, error};
 
 use crate::buffers::{OutboundBuffer, Signal};
 use crate::config::Config;
 use crate::exporter;
-use crate::extensions_api::{self, ExtensionsApi, ExtensionsApiEvent};
+use crate::extensions_api::{self, ApiError, ExtensionsApi, ExtensionsApiEvent};
 use crate::telemetry_listener::TelemetryEvent;
 use crate::{otlp_listener, telemetry_listener};
 
@@ -25,6 +25,7 @@ pub struct EventLoop<'a, A: ExtensionsApi> {
     cancel: CancellationToken,
     otlp_task: JoinHandle<()>,
     telemetry_task: JoinHandle<()>,
+    next_event_fut: ReusableBoxFuture<'a, Result<ExtensionsApiEvent, ApiError>>,
 }
 
 impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
@@ -60,73 +61,84 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
             cancel,
             otlp_task,
             telemetry_task,
+            next_event_fut: ReusableBoxFuture::new(api.next_event()),
         })
     }
 
     /// Multiplexes extensions API, OTLP payloads, and telemetry events.
     ///
-    /// The `next_event` future is `Box::pin`-ned outside the loop so that it
+    /// The `next_event` future is boxed and pinned on the event loop so that it
     /// survives across `select!` iterations. Without this, receiving an OTLP
     /// payload or telemetry event would cancel the in-flight long-poll to the
     /// Extensions API, leaving an orphaned HTTP request that corrupts the RIE
     /// state machine.
     pub async fn run(&mut self) {
-        let mut next_event_fut = Box::pin(self.api.next_event());
-
         loop {
-            tokio::select! {
-                event = &mut next_event_fut => {
-                    match event {
-                        Ok(ExtensionsApiEvent::Invoke { request_id }) => {
-                            debug!(request_id, "Received invoke event");
-                            // TODO: record invocation metadata in state map
+            if self.tick().await.is_none() {
+                break;
+            };
+        }
+    }
 
-                            // Post-invocation flush: export buffered data from previous invocation
-                            if let Err(e) = self.exporter.export(&mut self.buffer).await {
-                                error!(error = %e, "flush failed");
-                            }
-                        }
-                        Ok(ExtensionsApiEvent::Shutdown { reason }) => {
-                            debug!(reason, "Received shutdown event");
-                            self.cancel.cancel();
+    /// Run one tick of the event loop
+    ///
+    /// Returns `None` when it receives a Shutdown event from the lambda extension API. Otherwise
+    /// returns `Some(())`.
+    async fn tick(&mut self) -> Option<()> {
+        tokio::select! {
+            event = &mut self.next_event_fut => {
+                match event {
+                    Ok(ExtensionsApiEvent::Invoke { request_id }) => {
+                        debug!(request_id, "Received invoke event");
+                        // TODO: record invocation metadata in state map
 
-                            // Drain any payloads still in the channel
-                            self.otlp_rx.close();
-                            while let Some((signal, payload)) = self.otlp_rx.recv().await {
-                                self.buffer.push(signal, payload);
-                            }
-
-                            if let Err(e) = self.exporter.export(&mut self.buffer).await {
-                                error!(error = %e, "shutdown flush failed");
-                            }
-                            break;
-                        }
-                        Err(e) => {
-                            error!(error = %e, "extensions API error");
+                        // Post-invocation flush: export buffered data from previous invocation
+                        if let Err(e) = self.exporter.export(&mut self.buffer).await {
+                            error!(error = %e, "flush failed");
                         }
                     }
-                    next_event_fut = Box::pin(self.api.next_event());
-                }
-                Some((signal, payload)) = self.otlp_rx.recv() => {
-                    self.buffer.push(signal, payload);
-                    // TODO: race flush trigger (mid-invocation background flush)
-                    // TODO: buffer size threshold flush
-                }
-                Some(event) = self.telemetry_rx.recv() => {
-                    match event {
-                        TelemetryEvent::RuntimeDone { request_id, status } => {
-                            debug!(request_id, status, "Received runtimeDone event");
-                            // TODO: update invocation state map, emit timeout log record
+                    Ok(ExtensionsApiEvent::Shutdown { reason }) => {
+                        debug!(reason, "Received shutdown event");
+                        self.cancel.cancel();
+
+                        // Drain any payloads still in the channel
+                        self.otlp_rx.close();
+                        while let Some((signal, payload)) = self.otlp_rx.recv().await {
+                            self.buffer.push(signal, payload);
                         }
-                        TelemetryEvent::Start { request_id, tracing_value } => {
-                            let _tracing_value = tracing_value;
-                            debug!(request_id, "Received start event");
-                            // TODO: extract X-Ray trace ID, store in state map
+
+                        if let Err(e) = self.exporter.export(&mut self.buffer).await {
+                            error!(error = %e, "shutdown flush failed");
                         }
+
+                        return None;
+                    }
+                    Err(e) => {
+                        error!(error = %e, "extensions API error");
+                    }
+                }
+                self.next_event_fut.set(self.api.next_event());
+            }
+            Some((signal, payload)) = self.otlp_rx.recv() => {
+                self.buffer.push(signal, payload);
+                // TODO: race flush trigger (mid-invocation background flush)
+                // TODO: buffer size threshold flush
+            }
+            Some(event) = self.telemetry_rx.recv() => {
+                match event {
+                    TelemetryEvent::RuntimeDone { request_id, status } => {
+                        debug!(request_id, status, "Received runtimeDone event");
+                        // TODO: update invocation state map, emit timeout log record
+                    }
+                    TelemetryEvent::Start { request_id, tracing_value } => {
+                        let _tracing_value = tracing_value;
+                        debug!(request_id, "Received start event");
+                        // TODO: extract X-Ray trace ID, store in state map
                     }
                 }
             }
         }
+        Some(())
     }
 }
 
@@ -236,24 +248,19 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(resp.status(), 200);
+
+            // Process OTLP payload
+            event_loop.tick().await;
         }
 
-        // Spawn an assertion task that checks the call count then releases
-        // the mock to deliver the SHUTDOWN event.
-        let assertion = tokio::spawn(async move {
-            // Give the event loop time to process the OTLP messages
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // Release the mock to deliver SHUTDOWN event on next tick
+        state.release.notify_one();
+        event_loop.tick().await;
 
-            assert_eq!(
-                state.next_event_calls.load(Ordering::SeqCst),
-                1,
-                "next_event must be called exactly once — the future must not be dropped and recreated"
-            );
-
-            state.release.notify_one();
-        });
-
-        event_loop.run().await;
-        assertion.await.unwrap();
+        assert_eq!(
+            state.next_event_calls.load(Ordering::SeqCst),
+            1,
+            "next_event must be called exactly once — the future must not be dropped and recreated"
+        );
     }
 }

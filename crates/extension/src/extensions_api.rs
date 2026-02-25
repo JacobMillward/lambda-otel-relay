@@ -8,8 +8,11 @@ use thiserror::Error;
 const EXTENSION_NAME: &str = "lambda-otel-relay";
 
 pub trait ExtensionsApi {
-    fn next_event(&self) -> impl Future<Output = Result<ExtensionsApiEvent, ApiError>> + '_;
-    fn register_telemetry(&self, port: u16) -> impl Future<Output = Result<(), ApiError>> + '_;
+    fn next_event(&self) -> impl Future<Output = Result<ExtensionsApiEvent, ApiError>> + Send + '_;
+    fn register_telemetry(
+        &self,
+        port: u16,
+    ) -> impl Future<Output = Result<(), ApiError>> + Send + '_;
 }
 
 #[derive(Debug, Error)]
