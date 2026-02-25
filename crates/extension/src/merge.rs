@@ -44,115 +44,130 @@ impl ResourceIdentity {
     }
 }
 
-pub fn merge_traces(payloads: &VecDeque<Bytes>) -> ExportTraceServiceRequest {
-    // Upper bound: at most one distinct resource per payload, capped at 8
-    // to avoid over-allocating when the queue is large but resource count is small.
+/// Abstracts the per-signal differences so a single generic [`merge`]
+/// function can handle traces, metrics, and logs.
+trait MergeableRequest: Message + Default {
+    type Item;
+
+    fn signal_name() -> &'static str;
+    fn into_items(self) -> Vec<Self::Item>;
+    fn from_items(items: Vec<Self::Item>) -> Self;
+    fn resource(item: &Self::Item) -> Option<&Resource>;
+    fn extend_scopes(existing: &mut Self::Item, incoming: Self::Item);
+}
+
+impl MergeableRequest for ExportTraceServiceRequest {
+    type Item = ResourceSpans;
+
+    fn signal_name() -> &'static str {
+        "trace"
+    }
+    fn into_items(self) -> Vec<ResourceSpans> {
+        self.resource_spans
+    }
+    fn from_items(items: Vec<ResourceSpans>) -> Self {
+        Self {
+            resource_spans: items,
+        }
+    }
+    fn resource(item: &ResourceSpans) -> Option<&Resource> {
+        item.resource.as_ref()
+    }
+    fn extend_scopes(existing: &mut ResourceSpans, incoming: ResourceSpans) {
+        existing.scope_spans.extend(incoming.scope_spans);
+    }
+}
+
+impl MergeableRequest for ExportMetricsServiceRequest {
+    type Item = ResourceMetrics;
+
+    fn signal_name() -> &'static str {
+        "metrics"
+    }
+    fn into_items(self) -> Vec<ResourceMetrics> {
+        self.resource_metrics
+    }
+    fn from_items(items: Vec<ResourceMetrics>) -> Self {
+        Self {
+            resource_metrics: items,
+        }
+    }
+    fn resource(item: &ResourceMetrics) -> Option<&Resource> {
+        item.resource.as_ref()
+    }
+    fn extend_scopes(existing: &mut ResourceMetrics, incoming: ResourceMetrics) {
+        existing.scope_metrics.extend(incoming.scope_metrics);
+    }
+}
+
+impl MergeableRequest for ExportLogsServiceRequest {
+    type Item = ResourceLogs;
+
+    fn signal_name() -> &'static str {
+        "logs"
+    }
+    fn into_items(self) -> Vec<ResourceLogs> {
+        self.resource_logs
+    }
+    fn from_items(items: Vec<ResourceLogs>) -> Self {
+        Self {
+            resource_logs: items,
+        }
+    }
+    fn resource(item: &ResourceLogs) -> Option<&Resource> {
+        item.resource.as_ref()
+    }
+    fn extend_scopes(existing: &mut ResourceLogs, incoming: ResourceLogs) {
+        existing.scope_logs.extend(incoming.scope_logs);
+    }
+}
+
+/// Decode, deduplicate by resource identity, and merge scope entries.
+fn merge<M: MergeableRequest>(payloads: &VecDeque<Bytes>) -> M {
     let capacity = payloads.len().min(8);
-    let mut groups: HashMap<ResourceIdentity, ResourceSpans> = HashMap::with_capacity(capacity);
+    let mut groups: HashMap<ResourceIdentity, M::Item> = HashMap::with_capacity(capacity);
     let mut order: Vec<ResourceIdentity> = Vec::with_capacity(capacity);
 
     for payload in payloads {
-        let req = match ExportTraceServiceRequest::decode(payload.as_ref()) {
+        let req = match M::decode(payload.as_ref()) {
             Ok(r) => r,
             Err(e) => {
-                warn!(error = %e, "skipping malformed trace payload");
+                warn!(error = %e, "skipping malformed {} payload", M::signal_name());
                 continue;
             }
         };
-        for rs in req.resource_spans {
-            let id = ResourceIdentity::from_resource(rs.resource.as_ref());
+        for item in req.into_items() {
+            let id = ResourceIdentity::from_resource(M::resource(&item));
             match groups.entry(id) {
                 Entry::Occupied(mut e) => {
-                    e.get_mut().scope_spans.extend(rs.scope_spans);
+                    M::extend_scopes(e.get_mut(), item);
                 }
                 Entry::Vacant(e) => {
                     order.push(e.key().clone());
-                    e.insert(rs);
+                    e.insert(item);
                 }
             }
         }
     }
 
-    ExportTraceServiceRequest {
-        resource_spans: order
+    M::from_items(
+        order
             .into_iter()
             .filter_map(|id| groups.remove(&id))
             .collect(),
-    }
+    )
+}
+
+pub fn merge_traces(payloads: &VecDeque<Bytes>) -> ExportTraceServiceRequest {
+    merge(payloads)
 }
 
 pub fn merge_metrics(payloads: &VecDeque<Bytes>) -> ExportMetricsServiceRequest {
-    // Upper bound: at most one distinct resource per payload, capped at 8
-    // to avoid over-allocating when the queue is large but resource count is small.
-    let capacity = payloads.len().min(8);
-    let mut groups: HashMap<ResourceIdentity, ResourceMetrics> = HashMap::with_capacity(capacity);
-    let mut order: Vec<ResourceIdentity> = Vec::with_capacity(capacity);
-
-    for payload in payloads {
-        let req = match ExportMetricsServiceRequest::decode(payload.as_ref()) {
-            Ok(r) => r,
-            Err(e) => {
-                warn!(error = %e, "skipping malformed metrics payload");
-                continue;
-            }
-        };
-        for rm in req.resource_metrics {
-            let id = ResourceIdentity::from_resource(rm.resource.as_ref());
-            match groups.entry(id) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut().scope_metrics.extend(rm.scope_metrics);
-                }
-                Entry::Vacant(e) => {
-                    order.push(e.key().clone());
-                    e.insert(rm);
-                }
-            }
-        }
-    }
-
-    ExportMetricsServiceRequest {
-        resource_metrics: order
-            .into_iter()
-            .filter_map(|id| groups.remove(&id))
-            .collect(),
-    }
+    merge(payloads)
 }
 
 pub fn merge_logs(payloads: &VecDeque<Bytes>) -> ExportLogsServiceRequest {
-    // Upper bound: at most one distinct resource per payload, capped at 8
-    // to avoid over-allocating when the queue is large but resource count is small.
-    let capacity = payloads.len().min(8);
-    let mut groups: HashMap<ResourceIdentity, ResourceLogs> = HashMap::with_capacity(capacity);
-    let mut order: Vec<ResourceIdentity> = Vec::with_capacity(capacity);
-
-    for payload in payloads {
-        let req = match ExportLogsServiceRequest::decode(payload.as_ref()) {
-            Ok(r) => r,
-            Err(e) => {
-                warn!(error = %e, "skipping malformed logs payload");
-                continue;
-            }
-        };
-        for rl in req.resource_logs {
-            let id = ResourceIdentity::from_resource(rl.resource.as_ref());
-            match groups.entry(id) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut().scope_logs.extend(rl.scope_logs);
-                }
-                Entry::Vacant(e) => {
-                    order.push(e.key().clone());
-                    e.insert(rl);
-                }
-            }
-        }
-    }
-
-    ExportLogsServiceRequest {
-        resource_logs: order
-            .into_iter()
-            .filter_map(|id| groups.remove(&id))
-            .collect(),
-    }
+    merge(payloads)
 }
 
 #[cfg(test)]
