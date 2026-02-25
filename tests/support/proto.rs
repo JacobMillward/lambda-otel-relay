@@ -1,0 +1,79 @@
+#[allow(
+    dead_code,
+    clippy::enum_variant_names,
+    clippy::doc_overindented_list_items,
+    clippy::doc_lazy_continuation
+)]
+pub mod opentelemetry {
+    pub mod proto {
+        pub mod common {
+            pub mod v1 {
+                include!(concat!(
+                    env!("OUT_DIR"),
+                    "/opentelemetry.proto.common.v1.rs"
+                ));
+            }
+        }
+        pub mod resource {
+            pub mod v1 {
+                include!(concat!(
+                    env!("OUT_DIR"),
+                    "/opentelemetry.proto.resource.v1.rs"
+                ));
+            }
+        }
+        pub mod trace {
+            pub mod v1 {
+                include!(concat!(env!("OUT_DIR"), "/opentelemetry.proto.trace.v1.rs"));
+            }
+        }
+        pub mod metrics {
+            pub mod v1 {
+                include!(concat!(
+                    env!("OUT_DIR"),
+                    "/opentelemetry.proto.metrics.v1.rs"
+                ));
+            }
+        }
+        pub mod logs {
+            pub mod v1 {
+                include!(concat!(env!("OUT_DIR"), "/opentelemetry.proto.logs.v1.rs"));
+            }
+        }
+        pub mod collector {
+            pub mod trace {
+                pub mod v1 {
+                    include!(concat!(
+                        env!("OUT_DIR"),
+                        "/opentelemetry.proto.collector.trace.v1.rs"
+                    ));
+                }
+            }
+            pub mod metrics {
+                pub mod v1 {
+                    include!(concat!(
+                        env!("OUT_DIR"),
+                        "/opentelemetry.proto.collector.metrics.v1.rs"
+                    ));
+                }
+            }
+            pub mod logs {
+                pub mod v1 {
+                    include!(concat!(
+                        env!("OUT_DIR"),
+                        "/opentelemetry.proto.collector.logs.v1.rs"
+                    ));
+                }
+            }
+        }
+    }
+}
+
+pub use opentelemetry::proto::collector::logs::v1::ExportLogsServiceRequest;
+pub use opentelemetry::proto::collector::metrics::v1::ExportMetricsServiceRequest;
+pub use opentelemetry::proto::collector::trace::v1::ExportTraceServiceRequest;
+pub use opentelemetry::proto::common::v1::{AnyValue, KeyValue};
+pub use opentelemetry::proto::logs::v1::ResourceLogs;
+pub use opentelemetry::proto::metrics::v1::ResourceMetrics;
+pub use opentelemetry::proto::resource::v1::Resource;
+pub use opentelemetry::proto::trace::v1::ResourceSpans;

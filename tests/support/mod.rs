@@ -4,5 +4,6 @@
 
 mod container_ext;
 pub mod harness;
+pub mod proto;
 
 pub use container_ext::{LogLevel, buf_contains_source, line_matches_source};
