@@ -37,7 +37,10 @@ pub fn start(port: u16) -> CollectorStore {
             .expect("failed to bind collector listener");
 
         loop {
-            let (stream, _) = listener.accept().await.expect("failed to accept connection");
+            let (stream, _) = listener
+                .accept()
+                .await
+                .expect("failed to accept connection");
             let store = store_clone.clone();
             tokio::spawn(async move {
                 let service = service_fn(move |req| {
@@ -92,7 +95,11 @@ where
         }
     }
 
-    let body_bytes = req.collect().await.map(|c| c.to_bytes()).unwrap_or_default();
+    let body_bytes = req
+        .collect()
+        .await
+        .map(|c| c.to_bytes())
+        .unwrap_or_default();
 
     let export = CollectedExport {
         path,
