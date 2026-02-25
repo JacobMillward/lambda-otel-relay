@@ -2,7 +2,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use tracing::debug;
 
-use test_handler::{Scenario, Action, ActionResult};
+use test_handler::{Action, ActionResult, Scenario};
 
 fn setup_logging() {
     use tracing_subscriber::filter::LevelFilter;
@@ -44,10 +44,7 @@ async fn main() {
         debug!(request_id = %request_id, "Received invocation");
 
         // 2. Read scenario from event payload (invalid/empty = no-op)
-        let scenario: Scenario = resp
-            .json()
-            .await
-            .unwrap_or(Scenario { actions: vec![] });
+        let scenario: Scenario = resp.json().await.unwrap_or(Scenario { actions: vec![] });
 
         // 3. Execute actions sequentially
         let mut results = vec![];

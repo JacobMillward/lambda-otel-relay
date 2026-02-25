@@ -8,8 +8,8 @@ use tokio::io::AsyncBufReadExt;
 
 use super::container_ext::{LogLevel, buf_contains_source, line_matches_source};
 
-pub use test_handler::Scenario;
 use test_handler::ActionResult;
+pub use test_handler::Scenario;
 
 const EXTENSION_LOG_TARGET: &str = "lambda_otel_relay";
 
