@@ -45,8 +45,11 @@ impl ResourceIdentity {
 }
 
 pub fn merge_traces(payloads: &VecDeque<Bytes>) -> ExportTraceServiceRequest {
-    let mut groups: HashMap<ResourceIdentity, ResourceSpans> = HashMap::new();
-    let mut order: Vec<ResourceIdentity> = Vec::new();
+    // Upper bound: at most one distinct resource per payload, capped at 8
+    // to avoid over-allocating when the queue is large but resource count is small.
+    let capacity = payloads.len().min(8);
+    let mut groups: HashMap<ResourceIdentity, ResourceSpans> = HashMap::with_capacity(capacity);
+    let mut order: Vec<ResourceIdentity> = Vec::with_capacity(capacity);
 
     for payload in payloads {
         let req = match ExportTraceServiceRequest::decode(payload.as_ref()) {
@@ -79,8 +82,11 @@ pub fn merge_traces(payloads: &VecDeque<Bytes>) -> ExportTraceServiceRequest {
 }
 
 pub fn merge_metrics(payloads: &VecDeque<Bytes>) -> ExportMetricsServiceRequest {
-    let mut groups: HashMap<ResourceIdentity, ResourceMetrics> = HashMap::new();
-    let mut order: Vec<ResourceIdentity> = Vec::new();
+    // Upper bound: at most one distinct resource per payload, capped at 8
+    // to avoid over-allocating when the queue is large but resource count is small.
+    let capacity = payloads.len().min(8);
+    let mut groups: HashMap<ResourceIdentity, ResourceMetrics> = HashMap::with_capacity(capacity);
+    let mut order: Vec<ResourceIdentity> = Vec::with_capacity(capacity);
 
     for payload in payloads {
         let req = match ExportMetricsServiceRequest::decode(payload.as_ref()) {
@@ -113,8 +119,11 @@ pub fn merge_metrics(payloads: &VecDeque<Bytes>) -> ExportMetricsServiceRequest 
 }
 
 pub fn merge_logs(payloads: &VecDeque<Bytes>) -> ExportLogsServiceRequest {
-    let mut groups: HashMap<ResourceIdentity, ResourceLogs> = HashMap::new();
-    let mut order: Vec<ResourceIdentity> = Vec::new();
+    // Upper bound: at most one distinct resource per payload, capped at 8
+    // to avoid over-allocating when the queue is large but resource count is small.
+    let capacity = payloads.len().min(8);
+    let mut groups: HashMap<ResourceIdentity, ResourceLogs> = HashMap::with_capacity(capacity);
+    let mut order: Vec<ResourceIdentity> = Vec::with_capacity(capacity);
 
     for payload in payloads {
         let req = match ExportLogsServiceRequest::decode(payload.as_ref()) {
