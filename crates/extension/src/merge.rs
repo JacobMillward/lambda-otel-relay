@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque, hash_map::Entry};
 
 use bytes::Bytes;
 use prost::Message;
@@ -9,7 +9,6 @@ use crate::proto::opentelemetry::proto::{
         logs::v1::ExportLogsServiceRequest, metrics::v1::ExportMetricsServiceRequest,
         trace::v1::ExportTraceServiceRequest,
     },
-    common::v1::KeyValue,
     logs::v1::ResourceLogs,
     metrics::v1::ResourceMetrics,
     resource::v1::Resource,
@@ -19,7 +18,7 @@ use crate::proto::opentelemetry::proto::{
 /// Canonical identity for a Resource, derived from its sorted attributes.
 /// Two resources with the same set of key-value attributes (regardless of
 /// original order) produce the same identity.
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct ResourceIdentity(Vec<u8>);
 
 impl ResourceIdentity {
@@ -27,12 +26,19 @@ impl ResourceIdentity {
         let Some(resource) = resource else {
             return Self(Vec::new());
         };
-        let mut attrs: Vec<&KeyValue> = resource.attributes.iter().collect();
-        attrs.sort_by(|a, b| a.key.cmp(&b.key));
+        // Sort by full encoded KeyValue (covers both key and value) so that
+        // attribute order doesn't affect identity and duplicate keys with
+        // different values don't collide.
+        let mut encoded: Vec<Vec<u8>> = resource
+            .attributes
+            .iter()
+            .map(|kv| kv.encode_to_vec())
+            .collect();
+        encoded.sort();
 
-        let mut buf = Vec::new();
-        for kv in attrs {
-            kv.encode(&mut buf).expect("KeyValue encoding cannot fail");
+        let mut buf = Vec::with_capacity(encoded.iter().map(|v| v.len()).sum());
+        for e in encoded {
+            buf.extend(e);
         }
         Self(buf)
     }
@@ -43,7 +49,7 @@ pub fn merge_traces(payloads: &VecDeque<Bytes>) -> ExportTraceServiceRequest {
     let mut order: Vec<ResourceIdentity> = Vec::new();
 
     for payload in payloads {
-        let req = match ExportTraceServiceRequest::decode(payload.clone()) {
+        let req = match ExportTraceServiceRequest::decode(payload.as_ref()) {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "skipping malformed trace payload");
@@ -52,13 +58,13 @@ pub fn merge_traces(payloads: &VecDeque<Bytes>) -> ExportTraceServiceRequest {
         };
         for rs in req.resource_spans {
             let id = ResourceIdentity::from_resource(rs.resource.as_ref());
-            match groups.get_mut(&id) {
-                Some(existing) => {
-                    existing.scope_spans.extend(rs.scope_spans);
+            match groups.entry(id) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().scope_spans.extend(rs.scope_spans);
                 }
-                None => {
-                    order.push(ResourceIdentity::from_resource(rs.resource.as_ref()));
-                    groups.insert(id, rs);
+                Entry::Vacant(e) => {
+                    order.push(e.key().clone());
+                    e.insert(rs);
                 }
             }
         }
@@ -77,7 +83,7 @@ pub fn merge_metrics(payloads: &VecDeque<Bytes>) -> ExportMetricsServiceRequest 
     let mut order: Vec<ResourceIdentity> = Vec::new();
 
     for payload in payloads {
-        let req = match ExportMetricsServiceRequest::decode(payload.clone()) {
+        let req = match ExportMetricsServiceRequest::decode(payload.as_ref()) {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "skipping malformed metrics payload");
@@ -86,13 +92,13 @@ pub fn merge_metrics(payloads: &VecDeque<Bytes>) -> ExportMetricsServiceRequest 
         };
         for rm in req.resource_metrics {
             let id = ResourceIdentity::from_resource(rm.resource.as_ref());
-            match groups.get_mut(&id) {
-                Some(existing) => {
-                    existing.scope_metrics.extend(rm.scope_metrics);
+            match groups.entry(id) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().scope_metrics.extend(rm.scope_metrics);
                 }
-                None => {
-                    order.push(ResourceIdentity::from_resource(rm.resource.as_ref()));
-                    groups.insert(id, rm);
+                Entry::Vacant(e) => {
+                    order.push(e.key().clone());
+                    e.insert(rm);
                 }
             }
         }
@@ -111,7 +117,7 @@ pub fn merge_logs(payloads: &VecDeque<Bytes>) -> ExportLogsServiceRequest {
     let mut order: Vec<ResourceIdentity> = Vec::new();
 
     for payload in payloads {
-        let req = match ExportLogsServiceRequest::decode(payload.clone()) {
+        let req = match ExportLogsServiceRequest::decode(payload.as_ref()) {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "skipping malformed logs payload");
@@ -120,13 +126,13 @@ pub fn merge_logs(payloads: &VecDeque<Bytes>) -> ExportLogsServiceRequest {
         };
         for rl in req.resource_logs {
             let id = ResourceIdentity::from_resource(rl.resource.as_ref());
-            match groups.get_mut(&id) {
-                Some(existing) => {
-                    existing.scope_logs.extend(rl.scope_logs);
+            match groups.entry(id) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().scope_logs.extend(rl.scope_logs);
                 }
-                None => {
-                    order.push(ResourceIdentity::from_resource(rl.resource.as_ref()));
-                    groups.insert(id, rl);
+                Entry::Vacant(e) => {
+                    order.push(e.key().clone());
+                    e.insert(rl);
                 }
             }
         }
@@ -144,7 +150,7 @@ pub fn merge_logs(payloads: &VecDeque<Bytes>) -> ExportLogsServiceRequest {
 mod tests {
     use super::*;
     use crate::proto::opentelemetry::proto::{
-        common::v1::{AnyValue, any_value},
+        common::v1::{AnyValue, KeyValue, any_value},
         trace::v1::ScopeSpans,
     };
 
