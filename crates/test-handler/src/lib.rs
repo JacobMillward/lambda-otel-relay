@@ -2,7 +2,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 /// Describes what the test handler does during a single invocation
 pub struct Scenario {
     pub actions: Vec<Action>,
@@ -10,7 +10,7 @@ pub struct Scenario {
 
 impl Scenario {
     pub fn new() -> Self {
-        Self { actions: vec![] }
+        Self::default()
     }
 
     /// The handler will POST to the extension's OTLP listener at the given path.
