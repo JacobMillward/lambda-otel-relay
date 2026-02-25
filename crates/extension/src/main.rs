@@ -112,10 +112,17 @@ async fn main() {
             .await
             .unwrap_or_else(|e| fatal("failed to register with Telemetry API", &e));
 
-    // Event loop — multiplexes extensions API, OTLP payloads, and telemetry events
+    // Event loop — multiplexes extensions API, OTLP payloads, and telemetry events.
+    //
+    // The next_event future is pinned outside the loop so that it survives across
+    // select! iterations. Without this, receiving an OTLP payload or telemetry
+    // event would cancel the in-flight long-poll to the Extensions API, leaving an
+    // orphaned request.
+    let mut next_event_fut = Box::pin(ext.next_event());
+
     loop {
         tokio::select! {
-            event = ext.next_event() => {
+            event = &mut next_event_fut => {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
                         debug!(request_id, "Received invoke event");
@@ -145,6 +152,7 @@ async fn main() {
                         error!(error = %e, "extensions API error");
                     }
                 }
+                next_event_fut = Box::pin(ext.next_event());
             }
             Some((signal, payload)) = otlp_rx.recv() => {
                 buffer.push(signal, payload);
