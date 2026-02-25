@@ -88,10 +88,10 @@ where
     let mut headers = HashMap::new();
     for (name, value) in req.headers() {
         let name_str = name.as_str();
-        if !EXCLUDED_HEADERS.contains(&name_str) {
-            if let Ok(v) = value.to_str() {
-                headers.insert(name_str.to_owned(), v.to_owned());
-            }
+        if !EXCLUDED_HEADERS.contains(&name_str)
+            && let Ok(v) = value.to_str()
+        {
+            headers.insert(name_str.to_owned(), v.to_owned());
         }
     }
 
