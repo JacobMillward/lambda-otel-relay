@@ -24,3 +24,13 @@ just test              # unit tests
 just integration-test  # builds extension + runs integration tests (requires Docker)
 just test-all          # both
 ```
+
+## Vendored Protos
+
+OTLP `.proto` files are vendored from [opentelemetry-proto](https://github.com/open-telemetry/opentelemetry-proto). The pinned version lives in `proto/.version`.
+
+```sh
+just vendor                # re-download protos at the pinned version
+just vendor-upgrade        # upgrade to latest release
+just vendor-upgrade v1.5.0 # upgrade to a specific release
+```
