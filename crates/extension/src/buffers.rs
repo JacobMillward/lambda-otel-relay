@@ -9,6 +9,7 @@ pub enum Signal {
     Logs,
 }
 
+#[derive(Default)]
 pub struct SignalBuffer {
     pub queue: VecDeque<Bytes>,
     pub size_bytes: usize,
@@ -25,29 +26,11 @@ impl SignalBuffer {
     }
 }
 
+#[derive(Default)]
 pub struct OutboundBuffer {
     pub traces: SignalBuffer,
     pub metrics: SignalBuffer,
     pub logs: SignalBuffer,
-}
-
-impl Default for OutboundBuffer {
-    fn default() -> Self {
-        Self {
-            traces: SignalBuffer {
-                queue: VecDeque::new(),
-                size_bytes: 0,
-            },
-            metrics: SignalBuffer {
-                queue: VecDeque::new(),
-                size_bytes: 0,
-            },
-            logs: SignalBuffer {
-                queue: VecDeque::new(),
-                size_bytes: 0,
-            },
-        }
-    }
 }
 
 impl OutboundBuffer {
