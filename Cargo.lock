@@ -1070,6 +1070,7 @@ name = "lambda-otel-relay"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "flate2",
  "http-body-util",
  "hyper",
  "hyper-util",

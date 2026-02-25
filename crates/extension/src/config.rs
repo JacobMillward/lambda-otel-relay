@@ -1,8 +1,15 @@
 use std::collections::HashMap;
 use std::env;
+use std::time::Duration;
 
 use thiserror::Error;
 use url::Url;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Compression {
+    Gzip,
+    None,
+}
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -14,15 +21,20 @@ pub enum ConfigError {
 
     #[error("{0} has invalid value: {1}")]
     InvalidNumeric(String, String),
+
+    #[error("LAMBDA_OTEL_RELAY_COMPRESSION has invalid value: {0} (expected \"gzip\" or \"none\")")]
+    InvalidCompression(String),
 }
 
 #[derive(Debug)]
 pub struct Config {
-    #[allow(dead_code)]
     pub endpoint: Url,
     pub listener_port: u16,
     #[allow(dead_code)]
     pub telemetry_port: u16,
+    pub export_timeout: Duration,
+    pub compression: Compression,
+    pub export_headers: Vec<(String, String)>,
 }
 
 impl Config {
@@ -37,11 +49,17 @@ impl Config {
         let endpoint = parse_endpoint(vars)?;
         let listener_port = parse_port(vars, "LAMBDA_OTEL_RELAY_LISTENER_PORT", 4318)?;
         let telemetry_port = parse_port(vars, "LAMBDA_OTEL_RELAY_TELEMETRY_PORT", 4319)?;
+        let export_timeout = parse_duration_ms(vars, "LAMBDA_OTEL_RELAY_EXPORT_TIMEOUT_MS", 5000)?;
+        let compression = parse_compression(vars)?;
+        let export_headers = parse_headers(vars);
 
         Ok(Self {
             endpoint,
             listener_port,
             telemetry_port,
+            export_timeout,
+            compression,
+            export_headers,
         })
     }
 }
@@ -66,6 +84,49 @@ fn parse_port(
             .map_err(|_| ConfigError::InvalidNumeric(name.to_owned(), val.clone())),
         None => Ok(default),
     }
+}
+
+fn parse_duration_ms(
+    vars: &HashMap<String, String>,
+    name: &str,
+    default_ms: u64,
+) -> Result<Duration, ConfigError> {
+    match vars.get(name) {
+        Some(val) => {
+            let ms: u64 = val
+                .parse()
+                .map_err(|_| ConfigError::InvalidNumeric(name.to_owned(), val.clone()))?;
+            Ok(Duration::from_millis(ms))
+        }
+        None => Ok(Duration::from_millis(default_ms)),
+    }
+}
+
+fn parse_compression(vars: &HashMap<String, String>) -> Result<Compression, ConfigError> {
+    match vars.get("LAMBDA_OTEL_RELAY_COMPRESSION").map(|s| s.as_str()) {
+        Some("gzip") | None => Ok(Compression::Gzip),
+        Some("none") => Ok(Compression::None),
+        Some(other) => Err(ConfigError::InvalidCompression(other.to_owned())),
+    }
+}
+
+fn parse_headers(vars: &HashMap<String, String>) -> Vec<(String, String)> {
+    vars.get("LAMBDA_OTEL_RELAY_EXPORT_HEADERS")
+        .filter(|s| !s.is_empty())
+        .map(|raw| {
+            raw.split(',')
+                .filter_map(|pair| {
+                    let (k, v) = pair.split_once('=')?;
+                    let k = k.trim();
+                    let v = v.trim();
+                    if k.is_empty() {
+                        return None;
+                    }
+                    Some((k.to_owned(), v.to_owned()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -154,5 +215,94 @@ mod tests {
             matches!(err, ConfigError::InvalidNumeric(_, _)),
             "should reject non-numeric port"
         );
+    }
+
+    #[test]
+    fn default_export_timeout() {
+        let config = Config::parse(&vars(&[(
+            "LAMBDA_OTEL_RELAY_ENDPOINT",
+            "http://localhost:4318",
+        )]))
+        .unwrap();
+        assert_eq!(config.export_timeout, Duration::from_millis(5000));
+    }
+
+    #[test]
+    fn custom_export_timeout() {
+        let config = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_EXPORT_TIMEOUT_MS", "10000"),
+        ]))
+        .unwrap();
+        assert_eq!(config.export_timeout, Duration::from_millis(10000));
+    }
+
+    #[test]
+    fn invalid_export_timeout() {
+        let err = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_EXPORT_TIMEOUT_MS", "not_a_number"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidNumeric(_, _)));
+    }
+
+    #[test]
+    fn default_compression_is_gzip() {
+        let config = Config::parse(&vars(&[(
+            "LAMBDA_OTEL_RELAY_ENDPOINT",
+            "http://localhost:4318",
+        )]))
+        .unwrap();
+        assert_eq!(config.compression, Compression::Gzip);
+    }
+
+    #[test]
+    fn compression_none() {
+        let config = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_COMPRESSION", "none"),
+        ]))
+        .unwrap();
+        assert_eq!(config.compression, Compression::None);
+    }
+
+    #[test]
+    fn invalid_compression() {
+        let err = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_COMPRESSION", "snappy"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidCompression(_)));
+    }
+
+    #[test]
+    fn parses_export_headers() {
+        let config = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            (
+                "LAMBDA_OTEL_RELAY_EXPORT_HEADERS",
+                "x-api-key=abc123,x-tenant=foo",
+            ),
+        ]))
+        .unwrap();
+        assert_eq!(
+            config.export_headers,
+            vec![
+                ("x-api-key".to_owned(), "abc123".to_owned()),
+                ("x-tenant".to_owned(), "foo".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_headers_returns_empty_vec() {
+        let config = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_EXPORT_HEADERS", ""),
+        ]))
+        .unwrap();
+        assert!(config.export_headers.is_empty());
     }
 }

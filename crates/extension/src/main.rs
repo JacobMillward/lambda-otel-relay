@@ -3,6 +3,7 @@ mod config;
 mod exporter;
 mod extensions_api;
 mod otlp_listener;
+mod proto;
 mod telemetry_listener;
 
 use buffers::{OutboundBuffer, Signal};
@@ -83,6 +84,8 @@ async fn main() {
         .await
         .unwrap_or_else(|e| fatal("failed to register extension", &e));
 
+    let exporter = exporter::Exporter::new(&config);
+
     let cancel = CancellationToken::new();
     let mut buffer = OutboundBuffer::new();
 
@@ -118,7 +121,7 @@ async fn main() {
                         // TODO: record invocation metadata in state map
 
                         // Post-invocation flush: export buffered data from previous invocation
-                        if let Err(e) = exporter::export(&config.endpoint, &mut buffer).await {
+                        if let Err(e) = exporter.export(&mut buffer).await {
                             error!(error = %e, "flush failed");
                         }
                     }
@@ -132,7 +135,7 @@ async fn main() {
                             buffer.push(signal, payload);
                         }
 
-                        if let Err(e) = exporter::export(&config.endpoint, &mut buffer).await {
+                        if let Err(e) = exporter.export(&mut buffer).await {
                             error!(error = %e, "shutdown flush failed");
                         }
                         break;
