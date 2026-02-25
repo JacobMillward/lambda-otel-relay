@@ -1,14 +1,12 @@
+use std::collections::VecDeque;
 use std::io::Write;
 
+use bytes::Bytes;
 use flate2::write::GzEncoder;
 use prost::Message;
 use reqwest::Client;
 use thiserror::Error;
 use url::Url;
-
-use std::collections::VecDeque;
-
-use bytes::Bytes;
 
 use crate::buffers::OutboundBuffer;
 use crate::config::{Compression, Config};
@@ -77,7 +75,7 @@ impl Exporter {
             return Ok(());
         }
         let merged = merge::merge_traces(queue);
-        self.post("v1/traces", &merged.encode_to_vec()).await
+        self.post("v1/traces", merged.encode_to_vec()).await
     }
 
     async fn export_metrics(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
@@ -85,7 +83,7 @@ impl Exporter {
             return Ok(());
         }
         let merged = merge::merge_metrics(queue);
-        self.post("v1/metrics", &merged.encode_to_vec()).await
+        self.post("v1/metrics", merged.encode_to_vec()).await
     }
 
     async fn export_logs(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
@@ -93,26 +91,24 @@ impl Exporter {
             return Ok(());
         }
         let merged = merge::merge_logs(queue);
-        self.post("v1/logs", &merged.encode_to_vec()).await
+        self.post("v1/logs", merged.encode_to_vec()).await
     }
 
-    async fn post(&self, path: &str, body: &[u8]) -> Result<(), ExportError> {
+    async fn post(&self, path: &str, body: Vec<u8>) -> Result<(), ExportError> {
         let url = self.endpoint.join(path).expect("invalid export path");
-
-        let body = if self.compression == Compression::Gzip {
-            compress_gzip(body)?
-        } else {
-            body.to_vec()
-        };
 
         let mut req = self
             .client
             .post(url)
             .header("content-type", "application/x-protobuf");
 
-        if self.compression == Compression::Gzip {
-            req = req.header("content-encoding", "gzip");
-        }
+        let body = match self.compression {
+            Compression::Gzip => {
+                req = req.header("content-encoding", "gzip");
+                compress_gzip(&body)?
+            }
+            Compression::None => body,
+        };
 
         for (k, v) in &self.headers {
             req = req.header(k, v);
