@@ -34,7 +34,7 @@ impl ResourceIdentity {
             .iter()
             .map(|kv| kv.encode_to_vec())
             .collect();
-        encoded.sort();
+        encoded.sort_unstable();
 
         let mut buf = Vec::with_capacity(encoded.iter().map(|v| v.len()).sum());
         for e in encoded {
