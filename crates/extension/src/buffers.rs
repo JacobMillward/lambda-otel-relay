@@ -9,11 +9,24 @@ pub enum Signal {
     Logs,
 }
 
+#[derive(Default)]
 pub struct SignalBuffer {
     pub queue: VecDeque<Bytes>,
     pub size_bytes: usize,
 }
 
+impl SignalBuffer {
+    pub fn clear(&mut self) {
+        self.queue.clear();
+        self.size_bytes = 0;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+}
+
+#[derive(Default)]
 pub struct OutboundBuffer {
     pub traces: SignalBuffer,
     pub metrics: SignalBuffer,
@@ -22,20 +35,11 @@ pub struct OutboundBuffer {
 
 impl OutboundBuffer {
     pub fn new() -> Self {
-        Self {
-            traces: SignalBuffer {
-                queue: VecDeque::new(),
-                size_bytes: 0,
-            },
-            metrics: SignalBuffer {
-                queue: VecDeque::new(),
-                size_bytes: 0,
-            },
-            logs: SignalBuffer {
-                queue: VecDeque::new(),
-                size_bytes: 0,
-            },
-        }
+        Self::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.traces.is_empty() && self.metrics.is_empty() && self.logs.is_empty()
     }
 
     pub fn push(&mut self, signal: Signal, payload: Bytes) {
@@ -81,5 +85,31 @@ mod tests {
             buf.logs.size_bytes,
             "log1".len() + "log2".len() + "log3".len()
         );
+    }
+
+    #[test]
+    fn signal_buffer_clear() {
+        let mut buf = OutboundBuffer::new();
+        buf.push(Signal::Traces, Bytes::from("t1"));
+        buf.push(Signal::Traces, Bytes::from("t2"));
+        buf.traces.clear();
+        assert!(buf.traces.queue.is_empty());
+        assert_eq!(buf.traces.size_bytes, 0);
+    }
+
+    #[test]
+    fn signal_buffer_is_empty() {
+        let mut buf = OutboundBuffer::new();
+        assert!(buf.traces.is_empty());
+        buf.push(Signal::Traces, Bytes::from("t1"));
+        assert!(!buf.traces.is_empty());
+    }
+
+    #[test]
+    fn outbound_buffer_is_empty() {
+        let mut buf = OutboundBuffer::new();
+        assert!(buf.is_empty());
+        buf.push(Signal::Metrics, Bytes::from("m"));
+        assert!(!buf.is_empty());
     }
 }

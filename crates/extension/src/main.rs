@@ -2,7 +2,9 @@ mod buffers;
 mod config;
 mod exporter;
 mod extensions_api;
+mod merge;
 mod otlp_listener;
+mod proto;
 mod telemetry_listener;
 
 use buffers::{OutboundBuffer, Signal};
@@ -83,6 +85,8 @@ async fn main() {
         .await
         .unwrap_or_else(|e| fatal("failed to register extension", &e));
 
+    let exporter = exporter::Exporter::new(&config);
+
     let cancel = CancellationToken::new();
     let mut buffer = OutboundBuffer::new();
 
@@ -108,17 +112,24 @@ async fn main() {
             .await
             .unwrap_or_else(|e| fatal("failed to register with Telemetry API", &e));
 
-    // Event loop — multiplexes extensions API, OTLP payloads, and telemetry events
+    // Event loop — multiplexes extensions API, OTLP payloads, and telemetry events.
+    //
+    // The next_event future is pinned outside the loop so that it survives across
+    // select! iterations. Without this, receiving an OTLP payload or telemetry
+    // event would cancel the in-flight long-poll to the Extensions API, leaving an
+    // orphaned request.
+    let mut next_event_fut = Box::pin(ext.next_event());
+
     loop {
         tokio::select! {
-            event = ext.next_event() => {
+            event = &mut next_event_fut => {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
                         debug!(request_id, "Received invoke event");
                         // TODO: record invocation metadata in state map
 
                         // Post-invocation flush: export buffered data from previous invocation
-                        if let Err(e) = exporter::export(&config.endpoint, &mut buffer).await {
+                        if let Err(e) = exporter.export(&mut buffer).await {
                             error!(error = %e, "flush failed");
                         }
                     }
@@ -132,7 +143,7 @@ async fn main() {
                             buffer.push(signal, payload);
                         }
 
-                        if let Err(e) = exporter::export(&config.endpoint, &mut buffer).await {
+                        if let Err(e) = exporter.export(&mut buffer).await {
                             error!(error = %e, "shutdown flush failed");
                         }
                         break;
@@ -141,6 +152,7 @@ async fn main() {
                         error!(error = %e, "extensions API error");
                     }
                 }
+                next_event_fut = Box::pin(ext.next_event());
             }
             Some((signal, payload)) = otlp_rx.recv() => {
                 buffer.push(signal, payload);

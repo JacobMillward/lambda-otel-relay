@@ -9,7 +9,7 @@ use tokio::io::AsyncBufReadExt;
 use super::container_ext::{LogLevel, buf_contains_source, line_matches_source};
 
 use test_handler::ActionResult;
-pub use test_handler::Scenario;
+pub use test_handler::{CollectedExport, Scenario};
 
 const EXTENSION_LOG_TARGET: &str = "lambda_otel_relay";
 
@@ -81,7 +81,7 @@ impl LambdaTest {
             ))
             .with_cmd(["bootstrap"])
             .with_startup_timeout(Duration::from_secs(30))
-            .with_env_var("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318");
+            .with_env_var("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4200");
 
         for (key, val) in &self.env {
             image = image.with_env_var(key, val);
@@ -279,6 +279,15 @@ impl InvokeResult {
             .find(|r| r.action == "post_otlp" && r.path.as_deref() == Some(path))
             .and_then(|r| r.status)
             .unwrap_or_else(|| panic!("No post_otlp result for path {path}"))
+    }
+
+    /// Get the collected exports from a `get_collected` action.
+    pub fn collected(&self) -> &[CollectedExport] {
+        self.results
+            .iter()
+            .find(|r| r.action == "get_collected")
+            .and_then(|r| r.collected.as_deref())
+            .unwrap_or(&[])
     }
 }
 

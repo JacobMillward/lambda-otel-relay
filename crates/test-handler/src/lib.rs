@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
@@ -22,6 +24,15 @@ impl Scenario {
         self
     }
 
+    /// The handler will drain and return collected exports from the mock collector.
+    pub fn get_collected(mut self, timeout_ms: Option<u64>, min_expected: Option<usize>) -> Self {
+        self.actions.push(Action::GetCollected {
+            timeout_ms,
+            min_expected,
+        });
+        self
+    }
+
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap()
     }
@@ -32,6 +43,21 @@ impl Scenario {
 pub enum Action {
     #[serde(rename = "post_otlp")]
     PostOtlp { path: String, body: String },
+
+    #[serde(rename = "get_collected")]
+    GetCollected {
+        timeout_ms: Option<u64>,
+        min_expected: Option<usize>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CollectedExport {
+    pub path: String,
+    pub content_type: Option<String>,
+    pub content_encoding: Option<String>,
+    pub headers: HashMap<String, String>,
+    pub body: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,4 +67,6 @@ pub struct ActionResult {
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collected: Option<Vec<CollectedExport>>,
 }

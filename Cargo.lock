@@ -994,6 +994,11 @@ dependencies = [
 name = "integration-tests"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "prost",
+ "prost-build",
+ "protox",
  "reqwest",
  "rustls",
  "serde_json",
@@ -1070,6 +1075,7 @@ name = "lambda-otel-relay"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "flate2",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2149,6 +2155,10 @@ name = "test-handler"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "reqwest",
  "rustls",
  "serde",

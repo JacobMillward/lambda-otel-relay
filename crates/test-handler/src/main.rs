@@ -1,3 +1,5 @@
+mod collector;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use tracing::debug;
@@ -22,6 +24,7 @@ async fn main() {
         .install_default()
         .expect("failed to install rustls ring provider");
 
+    let store = collector::start(4200);
     let client = reqwest::Client::new();
     let runtime_api = std::env::var("AWS_LAMBDA_RUNTIME_API").unwrap();
 
@@ -65,6 +68,22 @@ async fn main() {
                         action: "post_otlp".into(),
                         path: Some(path.clone()),
                         status: Some(status),
+                        collected: None,
+                    });
+                }
+                Action::GetCollected {
+                    timeout_ms,
+                    min_expected,
+                } => {
+                    debug!(action = "get_collected", "Executing action");
+                    let timeout = timeout_ms.unwrap_or(2000);
+                    let min = min_expected.unwrap_or(1);
+                    let exports = collector::drain(&store, timeout, min).await;
+                    results.push(ActionResult {
+                        action: "get_collected".into(),
+                        path: None,
+                        status: None,
+                        collected: Some(exports),
                     });
                 }
             }
