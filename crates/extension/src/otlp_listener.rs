@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::Signal;
+use crate::buffers::Signal;
 
 fn response(status: StatusCode) -> Response<Full<Bytes>> {
     Response::builder()
@@ -80,11 +80,11 @@ where
     }
 }
 
-pub async fn serve(port: u16, tx: mpsc::Sender<(Signal, Bytes)>, cancel: CancellationToken) {
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .await
-        .expect("failed to bind OTLP listener");
-
+pub async fn serve(
+    listener: TcpListener,
+    tx: mpsc::Sender<(Signal, Bytes)>,
+    cancel: CancellationToken,
+) {
     loop {
         tokio::select! {
             result = listener.accept() => {

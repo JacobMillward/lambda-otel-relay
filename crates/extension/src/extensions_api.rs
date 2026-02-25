@@ -1,9 +1,16 @@
 #![allow(clippy::question_mark)] // nanoserde DeJson derive
 
+use std::future::Future;
+
 use nanoserde::DeJson;
 use thiserror::Error;
 
 const EXTENSION_NAME: &str = "lambda-otel-relay";
+
+pub trait ExtensionsApi {
+    fn next_event(&self) -> impl Future<Output = Result<ExtensionsApiEvent, ApiError>> + '_;
+    fn register_telemetry(&self, port: u16) -> impl Future<Output = Result<(), ApiError>> + '_;
+}
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -86,10 +93,12 @@ impl ExtensionApiClient {
             ext_id,
         })
     }
+}
 
+impl ExtensionsApi for ExtensionApiClient {
     /// Subscribe to the Lambda Telemetry API to receive platform lifecycle events.
     /// Must be called after the telemetry listener is bound and accepting connections.
-    pub async fn register_telemetry(&self, port: u16) -> Result<(), ApiError> {
+    async fn register_telemetry(&self, port: u16) -> Result<(), ApiError> {
         let url = format!("http://{}/2022-08-01/telemetry", self.runtime_api);
         let body = format!(
             r#"{{"schemaVersion":"2022-07-01","types":["platform"],"buffering":{{"timeoutMs":25,"maxBytes":262144,"maxItems":1000}},"destination":{{"protocol":"HTTP","URI":"http://sandbox:{port}"}}}}"#
@@ -116,7 +125,7 @@ impl ExtensionApiClient {
         Ok(())
     }
 
-    pub async fn next_event(&self) -> Result<ExtensionsApiEvent, ApiError> {
+    async fn next_event(&self) -> Result<ExtensionsApiEvent, ApiError> {
         let resp = self
             .client
             .get(format!(
