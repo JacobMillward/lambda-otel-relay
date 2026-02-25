@@ -2,6 +2,7 @@ mod buffers;
 mod config;
 mod exporter;
 mod extensions_api;
+mod merge;
 mod otlp_listener;
 mod proto;
 mod telemetry_listener;
