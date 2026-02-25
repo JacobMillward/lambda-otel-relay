@@ -1,4 +1,5 @@
 arch_flag := if arch() == "aarch64" { "--arm64" } else { "" }
+proto_version := trim(read("proto/.version"))
 
 _default:
     @just --list
@@ -45,3 +46,36 @@ integration-test: build-mock-rie
 
 # Run all tests
 test-all: test integration-test
+
+# Download vendored proto files at the version in proto/.version
+vendor:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Vendoring opentelemetry-proto at {{ proto_version }}"
+    while IFS= read -r file || [[ -n "${file}" ]]; do
+        [[ -z "${file}" ]] && continue
+        dest="proto/opentelemetry/proto/${file}"
+        mkdir -p "$(dirname "${dest}")"
+        curl -sfL "https://raw.githubusercontent.com/open-telemetry/opentelemetry-proto/{{ proto_version }}/opentelemetry/proto/${file}" -o "${dest}"
+        echo "  ${dest}"
+    done < proto/.files
+    echo "Done — {{ proto_version }}"
+
+# Upgrade vendored proto version (omit tag for latest)
+vendor-upgrade tag="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    latest=$(gh api repos/open-telemetry/opentelemetry-proto/releases/latest --jq '.tag_name')
+    if [[ -n "{{ tag }}" ]]; then
+        if ! gh api "repos/open-telemetry/opentelemetry-proto/releases/tags/{{ tag }}" --silent 2>/dev/null; then
+            echo "Error: '{{ tag }}' is not a valid release of open-telemetry/opentelemetry-proto" >&2
+            echo "  current: {{ proto_version }}" >&2
+            echo "  latest:  ${latest}" >&2
+            exit 1
+        fi
+        echo "{{ tag }}" > proto/.version
+    else
+        echo "${latest}" > proto/.version
+        echo "Resolved latest: ${latest}"
+    fi
+    just vendor
