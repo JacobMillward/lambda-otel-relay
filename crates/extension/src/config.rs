@@ -103,7 +103,10 @@ fn parse_duration_ms(
 }
 
 fn parse_compression(vars: &HashMap<String, String>) -> Result<Compression, ConfigError> {
-    match vars.get("LAMBDA_OTEL_RELAY_COMPRESSION").map(|s| s.as_str()) {
+    match vars
+        .get("LAMBDA_OTEL_RELAY_COMPRESSION")
+        .map(|s| s.as_str())
+    {
         Some("gzip") | None => Ok(Compression::Gzip),
         Some("none") => Ok(Compression::None),
         Some(other) => Err(ConfigError::InvalidCompression(other.to_owned())),

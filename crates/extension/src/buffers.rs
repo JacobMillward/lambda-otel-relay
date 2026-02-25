@@ -49,12 +49,6 @@ impl OutboundBuffer {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.traces.clear();
-        self.metrics.clear();
-        self.logs.clear();
-    }
-
     pub fn is_empty(&self) -> bool {
         self.traces.is_empty() && self.metrics.is_empty() && self.logs.is_empty()
     }
@@ -120,19 +114,6 @@ mod tests {
         assert!(buf.traces.is_empty());
         buf.push(Signal::Traces, Bytes::from("t1"));
         assert!(!buf.traces.is_empty());
-    }
-
-    #[test]
-    fn outbound_buffer_clear() {
-        let mut buf = OutboundBuffer::new();
-        buf.push(Signal::Traces, Bytes::from("t"));
-        buf.push(Signal::Metrics, Bytes::from("m"));
-        buf.push(Signal::Logs, Bytes::from("l"));
-        buf.clear();
-        assert!(buf.is_empty());
-        assert_eq!(buf.traces.size_bytes, 0);
-        assert_eq!(buf.metrics.size_bytes, 0);
-        assert_eq!(buf.logs.size_bytes, 0);
     }
 
     #[test]

@@ -6,6 +6,10 @@ use reqwest::Client;
 use thiserror::Error;
 use url::Url;
 
+use std::collections::VecDeque;
+
+use bytes::Bytes;
+
 use crate::buffers::OutboundBuffer;
 use crate::config::{Compression, Config};
 use crate::merge;
@@ -49,26 +53,47 @@ impl Exporter {
             return Ok(());
         }
 
-        // Traces
-        if !buffer.traces.is_empty() {
-            let merged = merge::merge_traces(&buffer.traces.queue);
-            self.post("v1/traces", &merged.encode_to_vec()).await?;
+        let (t, m, l) = tokio::join!(
+            self.export_traces(&buffer.traces.queue),
+            self.export_metrics(&buffer.metrics.queue),
+            self.export_logs(&buffer.logs.queue),
+        );
+
+        if t.is_ok() {
+            buffer.traces.clear();
+        }
+        if m.is_ok() {
+            buffer.metrics.clear();
+        }
+        if l.is_ok() {
+            buffer.logs.clear();
         }
 
-        // Metrics
-        if !buffer.metrics.is_empty() {
-            let merged = merge::merge_metrics(&buffer.metrics.queue);
-            self.post("v1/metrics", &merged.encode_to_vec()).await?;
-        }
+        t.and(m).and(l)
+    }
 
-        // Logs
-        if !buffer.logs.is_empty() {
-            let merged = merge::merge_logs(&buffer.logs.queue);
-            self.post("v1/logs", &merged.encode_to_vec()).await?;
+    async fn export_traces(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
+        if queue.is_empty() {
+            return Ok(());
         }
+        let merged = merge::merge_traces(queue);
+        self.post("v1/traces", &merged.encode_to_vec()).await
+    }
 
-        buffer.clear();
-        Ok(())
+    async fn export_metrics(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
+        if queue.is_empty() {
+            return Ok(());
+        }
+        let merged = merge::merge_metrics(queue);
+        self.post("v1/metrics", &merged.encode_to_vec()).await
+    }
+
+    async fn export_logs(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
+        if queue.is_empty() {
+            return Ok(());
+        }
+        let merged = merge::merge_logs(queue);
+        self.post("v1/logs", &merged.encode_to_vec()).await
     }
 
     async fn post(&self, path: &str, body: &[u8]) -> Result<(), ExportError> {

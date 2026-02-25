@@ -144,7 +144,7 @@ pub fn merge_logs(payloads: &VecDeque<Bytes>) -> ExportLogsServiceRequest {
 mod tests {
     use super::*;
     use crate::proto::opentelemetry::proto::{
-        common::v1::{any_value, AnyValue},
+        common::v1::{AnyValue, any_value},
         trace::v1::ScopeSpans,
     };
 
@@ -197,7 +197,11 @@ mod tests {
         queue.push_back(payload2);
 
         let merged = merge_traces(&queue);
-        assert_eq!(merged.resource_spans.len(), 1, "should merge into 1 resource");
+        assert_eq!(
+            merged.resource_spans.len(),
+            1,
+            "should merge into 1 resource"
+        );
         assert_eq!(
             merged.resource_spans[0].scope_spans.len(),
             3,
