@@ -45,3 +45,36 @@ integration-test: build-mock-rie
 
 # Run all tests
 test-all: test integration-test
+
+# Download vendored proto files at the version in proto/.version
+vendor:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag=$(cat proto/.version | tr -d '[:space:]')
+    echo "Vendoring opentelemetry-proto at ${tag}"
+    while IFS= read -r file || [[ -n "${file}" ]]; do
+        [[ -z "${file}" ]] && continue
+        dest="proto/opentelemetry/proto/${file}"
+        mkdir -p "$(dirname "${dest}")"
+        curl -sfL "https://raw.githubusercontent.com/open-telemetry/opentelemetry-proto/${tag}/opentelemetry/proto/${file}" -o "${dest}"
+        echo "  ${dest}"
+    done < proto/.files
+    echo "Done — ${tag}"
+    # Check for newer releases
+    latest=$(gh api repos/open-telemetry/opentelemetry-proto/releases/latest --jq '.tag_name' 2>/dev/null || true)
+    if [[ -n "${latest}" && "${latest}" != "${tag}" ]]; then
+        echo "Newer version available: ${latest}"
+    fi
+
+# Upgrade vendored proto version (omit tag for latest)
+vendor-upgrade tag="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "{{ tag }}" ]]; then
+        echo "{{ tag }}" > proto/.version
+    else
+        latest=$(gh api repos/open-telemetry/opentelemetry-proto/releases/latest --jq '.tag_name')
+        echo "${latest}" > proto/.version
+        echo "Resolved latest: ${latest}"
+    fi
+    just vendor

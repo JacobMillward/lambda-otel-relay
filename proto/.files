@@ -1,0 +1,8 @@
+common/v1/common.proto
+resource/v1/resource.proto
+trace/v1/trace.proto
+metrics/v1/metrics.proto
+logs/v1/logs.proto
+collector/trace/v1/trace_service.proto
+collector/metrics/v1/metrics_service.proto
+collector/logs/v1/logs_service.proto
