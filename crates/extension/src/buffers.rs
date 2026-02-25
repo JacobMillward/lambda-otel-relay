@@ -31,8 +31,8 @@ pub struct OutboundBuffer {
     pub logs: SignalBuffer,
 }
 
-impl OutboundBuffer {
-    pub fn new() -> Self {
+impl Default for OutboundBuffer {
+    fn default() -> Self {
         Self {
             traces: SignalBuffer {
                 queue: VecDeque::new(),
@@ -47,6 +47,12 @@ impl OutboundBuffer {
                 size_bytes: 0,
             },
         }
+    }
+}
+
+impl OutboundBuffer {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn is_empty(&self) -> bool {
