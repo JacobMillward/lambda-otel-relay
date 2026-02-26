@@ -35,6 +35,7 @@ pub struct Config {
     pub export_timeout: Duration,
     pub compression: Compression,
     pub export_headers: Vec<(String, String)>,
+    pub buffer_max_bytes: Option<usize>,
 }
 
 impl Config {
@@ -52,6 +53,8 @@ impl Config {
         let export_timeout = parse_duration_ms(vars, "LAMBDA_OTEL_RELAY_EXPORT_TIMEOUT_MS", 5000)?;
         let compression = parse_compression(vars)?;
         let export_headers = parse_headers(vars);
+        let buffer_max_bytes =
+            parse_buffer_max_bytes(vars, "LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES")?;
 
         Ok(Self {
             endpoint,
@@ -60,6 +63,7 @@ impl Config {
             export_timeout,
             compression,
             export_headers,
+            buffer_max_bytes,
         })
     }
 }
@@ -110,6 +114,25 @@ fn parse_compression(vars: &HashMap<String, String>) -> Result<Compression, Conf
         Some("gzip") | None => Ok(Compression::Gzip),
         Some("none") => Ok(Compression::None),
         Some(other) => Err(ConfigError::InvalidCompression(other.to_owned())),
+    }
+}
+
+fn parse_buffer_max_bytes(
+    vars: &HashMap<String, String>,
+    name: &str,
+) -> Result<Option<usize>, ConfigError> {
+    match vars.get(name) {
+        Some(val) => {
+            let bytes: usize = val
+                .parse()
+                .map_err(|_| ConfigError::InvalidNumeric(name.to_owned(), val.clone()))?;
+            if bytes == 0 {
+                Ok(None)
+            } else {
+                Ok(Some(bytes))
+            }
+        }
+        None => Ok(Some(4_194_304)), // 4 MiB default
     }
 }
 
@@ -297,6 +320,46 @@ mod tests {
                 ("x-tenant".to_owned(), "foo".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn default_buffer_max_bytes() {
+        let config = Config::parse(&vars(&[(
+            "LAMBDA_OTEL_RELAY_ENDPOINT",
+            "http://localhost:4318",
+        )]))
+        .unwrap();
+        assert_eq!(config.buffer_max_bytes, Some(4_194_304));
+    }
+
+    #[test]
+    fn custom_buffer_max_bytes() {
+        let config = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES", "1048576"),
+        ]))
+        .unwrap();
+        assert_eq!(config.buffer_max_bytes, Some(1_048_576));
+    }
+
+    #[test]
+    fn zero_buffer_max_bytes_disables() {
+        let config = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES", "0"),
+        ]))
+        .unwrap();
+        assert_eq!(config.buffer_max_bytes, None);
+    }
+
+    #[test]
+    fn invalid_buffer_max_bytes() {
+        let err = Config::parse(&vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES", "not_a_number"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidNumeric(_, _)));
     }
 
     #[test]

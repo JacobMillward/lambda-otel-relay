@@ -22,6 +22,7 @@ pub struct EventLoop<'a, A: ExtensionsApi> {
     api: &'a A,
     exporter: exporter::Exporter,
     buffer: OutboundBuffer,
+    buffer_max_bytes: Option<usize>,
     otlp_rx: mpsc::Receiver<(Signal, Bytes)>,
     telemetry_rx: mpsc::Receiver<TelemetryEvent>,
     cancel: CancellationToken,
@@ -58,6 +59,7 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
             api,
             exporter: exporter::Exporter::new(config),
             buffer: OutboundBuffer::new(),
+            buffer_max_bytes: config.buffer_max_bytes,
             otlp_rx,
             telemetry_rx,
             cancel,
@@ -72,6 +74,17 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
         loop {
             if let ControlFlow::Break(()) = self.tick().await {
                 break;
+            }
+        }
+    }
+
+    /// Flush the buffer to the collector. If the flush fails, evict oldest
+    /// entries until the buffer is at or below `buffer_max_bytes`.
+    async fn flush_and_evict(&mut self) {
+        if let Err(e) = self.exporter.export(&mut self.buffer).await {
+            error!(error = %e, "flush failed");
+            if let Some(max) = self.buffer_max_bytes {
+                self.buffer.evict_to(max);
             }
         }
     }
@@ -97,9 +110,7 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
                         // TODO: record invocation metadata in state map
 
                         // Post-invocation flush: export buffered data from previous invocation
-                        if let Err(e) = self.exporter.export(&mut self.buffer).await {
-                            error!(error = %e, "flush failed");
-                        }
+                        self.flush_and_evict().await;
                     }
                     Ok(ExtensionsApiEvent::Shutdown { reason }) => {
                         debug!(reason, "Received shutdown event");
@@ -115,6 +126,8 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
                             self.buffer.push(signal, payload);
                         }
 
+                        // Best-effort flush only — no eviction on failure since the
+                        // process is exiting and the data would be lost either way.
                         if let Err(e) = self.exporter.export(&mut self.buffer).await {
                             error!(error = %e, "shutdown flush failed");
                         }
@@ -130,7 +143,17 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
             Some((signal, payload)) = self.otlp_rx.recv() => {
                 self.buffer.push(signal, payload);
                 // TODO: race flush trigger (mid-invocation background flush)
-                // TODO: buffer size threshold flush
+                //
+                // Threshold flush: blocks the event loop for up to `export_timeout`.
+                // While blocked, the otlp_rx channel backfills (capacity 128); once
+                // full, OTLP HTTP handlers stall until the flush completes, causing
+                // latency spikes on the instrumented application's OTLP calls.
+                // Acceptable for now — a background flush strategy will decouple this.
+                if let Some(max) = self.buffer_max_bytes {
+                    if self.buffer.total_size_bytes() > max {
+                        self.flush_and_evict().await;
+                    }
+                }
             }
             Some(event) = self.telemetry_rx.recv() => {
                 match event {
@@ -213,6 +236,7 @@ mod tests {
             export_timeout: std::time::Duration::from_millis(100),
             compression: crate::config::Compression::None,
             export_headers: vec![],
+            buffer_max_bytes: Some(4_194_304),
         }
     }
 
