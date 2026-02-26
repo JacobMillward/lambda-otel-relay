@@ -29,10 +29,8 @@ pub enum ExportError {
 /// The returned future must be `Send` because `OutboundBuffer::spawn_flush`
 /// calls `exporter.export()` inside `tokio::spawn`.
 pub trait Exporter: Send + Sync + 'static {
-    fn export(
-        &self,
-        data: &mut BufferData,
-    ) -> impl Future<Output = Result<(), ExportError>> + Send;
+    fn export(&self, data: &mut BufferData)
+    -> impl Future<Output = Result<(), ExportError>> + Send;
 }
 
 pub struct OtlpExporter {

@@ -133,13 +133,25 @@ impl BufferData {
         }
 
         if dropped_count[0] > 0 {
-            warn!(bytes = dropped_bytes[0], count = dropped_count[0], "evicted traces data from buffer");
+            warn!(
+                bytes = dropped_bytes[0],
+                count = dropped_count[0],
+                "evicted traces data from buffer"
+            );
         }
         if dropped_count[1] > 0 {
-            warn!(bytes = dropped_bytes[1], count = dropped_count[1], "evicted metrics data from buffer");
+            warn!(
+                bytes = dropped_bytes[1],
+                count = dropped_count[1],
+                "evicted metrics data from buffer"
+            );
         }
         if dropped_count[2] > 0 {
-            warn!(bytes = dropped_bytes[2], count = dropped_count[2], "evicted logs data from buffer");
+            warn!(
+                bytes = dropped_bytes[2],
+                count = dropped_count[2],
+                "evicted logs data from buffer"
+            );
         }
     }
 }
@@ -456,10 +468,7 @@ mod tests {
         let data = buf.take();
         assert_eq!(data.total_size_bytes(), 10);
         let items: Vec<&Bytes> = data.traces.queue.iter().collect();
-        assert_eq!(
-            items,
-            vec![&Bytes::from("old2"), &Bytes::from("cur123")]
-        );
+        assert_eq!(items, vec![&Bytes::from("old2"), &Bytes::from("cur123")]);
     }
 
     #[test]

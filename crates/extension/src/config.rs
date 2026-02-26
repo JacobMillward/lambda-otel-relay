@@ -53,8 +53,7 @@ impl Config {
         let export_timeout = parse_duration_ms(vars, "LAMBDA_OTEL_RELAY_EXPORT_TIMEOUT_MS", 5000)?;
         let compression = parse_compression(vars)?;
         let export_headers = parse_headers(vars);
-        let buffer_max_bytes =
-            parse_buffer_max_bytes(vars, "LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES")?;
+        let buffer_max_bytes = parse_buffer_max_bytes(vars, "LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES")?;
 
         Ok(Self {
             endpoint,
