@@ -15,23 +15,32 @@ use crate::proto::opentelemetry::proto::{
     trace::v1::ResourceSpans,
 };
 
-/// Canonical identity for a Resource, derived from its sorted attributes.
-/// Two resources with the same set of key-value attributes (regardless of
-/// original order) produce the same identity.
+/// Canonical identity for a Resource, derived from its sorted attributes and
+/// the top-level `schema_url`. Two resources with the same set of key-value
+/// attributes (regardless of original order) **and** the same schema URL
+/// produce the same identity.
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
-struct ResourceIdentity(Vec<u8>);
+struct ResourceIdentity {
+    attributes: Vec<u8>,
+    schema_url: String,
+}
 
-impl From<&Resource> for ResourceIdentity {
-    fn from(value: &Resource) -> Self {
-        // BTreeMap deduplicates by key; per the OTLP spec, attribute keys MUST
-        // be unique, so this is safe. Non-conformant duplicates use last-write-wins.
-        let attributes: BTreeMap<&str, Vec<u8>> = value
-            .attributes
-            .iter()
-            .map(|kv| (&kv.key[..], kv.encode_to_vec()))
-            .collect();
-
-        Self(attributes.into_values().flatten().collect())
+impl ResourceIdentity {
+    fn new(resource: Option<&Resource>, schema_url: &str) -> Self {
+        let attributes = resource.map_or_else(Vec::new, |r| {
+            // BTreeMap deduplicates by key; per the OTLP spec, attribute keys MUST
+            // be unique, so this is safe. Non-conformant duplicates use last-write-wins.
+            let sorted: BTreeMap<&str, Vec<u8>> = r
+                .attributes
+                .iter()
+                .map(|kv| (&kv.key[..], kv.encode_to_vec()))
+                .collect();
+            sorted.into_values().flatten().collect()
+        });
+        Self {
+            attributes,
+            schema_url: schema_url.to_owned(),
+        }
     }
 }
 
@@ -43,7 +52,7 @@ trait MergeableRequest: Message + Default {
     fn signal_name() -> &'static str;
     fn into_items(self) -> Vec<Self::Item>;
     fn from_items(items: Vec<Self::Item>) -> Self;
-    fn resource(item: &Self::Item) -> Option<&Resource>;
+    fn identity(item: &Self::Item) -> ResourceIdentity;
     fn extend_scopes(existing: &mut Self::Item, incoming: Self::Item);
 }
 
@@ -61,8 +70,8 @@ impl MergeableRequest for ExportTraceServiceRequest {
             resource_spans: items,
         }
     }
-    fn resource(item: &ResourceSpans) -> Option<&Resource> {
-        item.resource.as_ref()
+    fn identity(item: &ResourceSpans) -> ResourceIdentity {
+        ResourceIdentity::new(item.resource.as_ref(), &item.schema_url)
     }
     fn extend_scopes(existing: &mut ResourceSpans, incoming: ResourceSpans) {
         existing.scope_spans.extend(incoming.scope_spans);
@@ -83,8 +92,8 @@ impl MergeableRequest for ExportMetricsServiceRequest {
             resource_metrics: items,
         }
     }
-    fn resource(item: &ResourceMetrics) -> Option<&Resource> {
-        item.resource.as_ref()
+    fn identity(item: &ResourceMetrics) -> ResourceIdentity {
+        ResourceIdentity::new(item.resource.as_ref(), &item.schema_url)
     }
     fn extend_scopes(existing: &mut ResourceMetrics, incoming: ResourceMetrics) {
         existing.scope_metrics.extend(incoming.scope_metrics);
@@ -105,8 +114,8 @@ impl MergeableRequest for ExportLogsServiceRequest {
             resource_logs: items,
         }
     }
-    fn resource(item: &ResourceLogs) -> Option<&Resource> {
-        item.resource.as_ref()
+    fn identity(item: &ResourceLogs) -> ResourceIdentity {
+        ResourceIdentity::new(item.resource.as_ref(), &item.schema_url)
     }
     fn extend_scopes(existing: &mut ResourceLogs, incoming: ResourceLogs) {
         existing.scope_logs.extend(incoming.scope_logs);
@@ -128,7 +137,7 @@ fn merge<M: MergeableRequest>(payloads: &VecDeque<Bytes>) -> M {
             }
         };
         for item in req.into_items() {
-            let id = M::resource(&item).map_or_else(Default::default, Into::into);
+            let id = M::identity(&item);
             match groups.entry(id) {
                 Entry::Occupied(mut e) => {
                     M::extend_scopes(e.get_mut(), item);
@@ -313,5 +322,26 @@ mod tests {
         let queue = VecDeque::new();
         let merged = merge_traces(&queue);
         assert!(merged.resource_spans.is_empty());
+    }
+
+    #[test]
+    fn different_schema_urls_stay_separate() {
+        let r = resource(vec![kv("service.name", "my-svc")]);
+        let mut rs1 = resource_spans(r.clone(), 1);
+        rs1.schema_url = "https://example.com/schema/v1".to_owned();
+        let mut rs2 = resource_spans(r, 1);
+        rs2.schema_url = "https://example.com/schema/v2".to_owned();
+
+        let payload = trace_request(vec![rs1, rs2]);
+
+        let mut queue = VecDeque::new();
+        queue.push_back(payload);
+
+        let merged = merge_traces(&queue);
+        assert_eq!(
+            merged.resource_spans.len(),
+            2,
+            "same attributes but different schema_url should stay separate"
+        );
     }
 }
