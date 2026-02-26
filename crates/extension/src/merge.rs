@@ -23,6 +23,8 @@ struct ResourceIdentity(Vec<u8>);
 
 impl From<&Resource> for ResourceIdentity {
     fn from(value: &Resource) -> Self {
+        // BTreeMap deduplicates by key; per the OTLP spec, attribute keys MUST
+        // be unique, so this is safe. Non-conformant duplicates use last-write-wins.
         let attributes: BTreeMap<&str, Vec<u8>> = value
             .attributes
             .iter()
