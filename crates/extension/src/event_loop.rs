@@ -1,3 +1,5 @@
+use std::ops::ControlFlow;
+
 use bytes::Bytes;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -65,16 +67,10 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
         })
     }
 
-    /// Multiplexes extensions API, OTLP payloads, and telemetry events.
-    ///
-    /// The `next_event` future is boxed and pinned on the event loop so that it
-    /// survives across `select!` iterations. Without this, receiving an OTLP
-    /// payload or telemetry event would cancel the in-flight long-poll to the
-    /// Extensions API, leaving an orphaned HTTP request that corrupts the RIE
-    /// state machine.
+    /// Run the event loop until it receives a Shutdown event from the extensions API.
     pub async fn run(&mut self) {
         loop {
-            if self.tick().await.is_none() {
+            if let ControlFlow::Break(()) = self.tick().await {
                 break;
             }
         }
@@ -82,9 +78,17 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
 
     /// Run one tick of the event loop
     ///
-    /// Returns `None` when it receives a Shutdown event from the lambda extension API. Otherwise
-    /// returns `Some(())`.
-    async fn tick(&mut self) -> Option<()> {
+    /// Multiplexes extensions API, OTLP payloads, and telemetry events.
+    ///
+    /// The `next_event` future is boxed and pinned on the event loop so that it
+    /// survives across `select!` iterations. Without this, receiving an OTLP
+    /// payload or telemetry event would cancel the in-flight long-poll to the
+    /// Extensions API, leaving an orphaned HTTP request that corrupts the RIE
+    /// state machine.
+    ///
+    /// Returns `ControlFlow::Break(())` when it receives a Shutdown event from the lambda extension API. Otherwise
+    /// returns `ControlFlow::Continue(())`.
+    async fn tick(&mut self) -> ControlFlow<()> {
         tokio::select! {
             event = &mut self.next_event_fut => {
                 match event {
@@ -111,7 +115,7 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
                             error!(error = %e, "shutdown flush failed");
                         }
 
-                        return None;
+                        return ControlFlow::Break(());
                     }
                     Err(e) => {
                         error!(error = %e, "extensions API error");
@@ -138,7 +142,7 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
                 }
             }
         }
-        Some(())
+        ControlFlow::Continue(())
     }
 }
 
@@ -250,12 +254,12 @@ mod tests {
             assert_eq!(resp.status(), 200);
 
             // Process OTLP payload
-            event_loop.tick().await;
+            let _ = event_loop.tick().await;
         }
 
         // Release the mock to deliver SHUTDOWN event on next tick
         state.release.notify_one();
-        event_loop.tick().await;
+        let _ = event_loop.tick().await;
 
         assert_eq!(
             state.next_event_calls.load(Ordering::SeqCst),
