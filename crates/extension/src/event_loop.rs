@@ -76,7 +76,7 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
         loop {
             if self.tick().await.is_none() {
                 break;
-            };
+            }
         }
     }
 
