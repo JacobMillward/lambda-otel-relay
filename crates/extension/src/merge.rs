@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque, hash_map::Entry};
+use std::collections::{BTreeMap, HashMap, VecDeque, hash_map::Entry};
 
 use bytes::Bytes;
 use prost::Message;
@@ -18,29 +18,18 @@ use crate::proto::opentelemetry::proto::{
 /// Canonical identity for a Resource, derived from its sorted attributes.
 /// Two resources with the same set of key-value attributes (regardless of
 /// original order) produce the same identity.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
 struct ResourceIdentity(Vec<u8>);
 
-impl ResourceIdentity {
-    fn from_resource(resource: Option<&Resource>) -> Self {
-        let Some(resource) = resource else {
-            return Self(Vec::new());
-        };
-        // Sort by full encoded KeyValue (covers both key and value) so that
-        // attribute order doesn't affect identity and duplicate keys with
-        // different values don't collide.
-        let mut encoded: Vec<Vec<u8>> = resource
+impl From<&Resource> for ResourceIdentity {
+    fn from(value: &Resource) -> Self {
+        let attributes: BTreeMap<&str, Vec<u8>> = value
             .attributes
             .iter()
-            .map(|kv| kv.encode_to_vec())
+            .map(|kv| (&kv.key[..], kv.encode_to_vec()))
             .collect();
-        encoded.sort_unstable();
 
-        let mut buf = Vec::with_capacity(encoded.iter().map(|v| v.len()).sum());
-        for e in encoded {
-            buf.extend(e);
-        }
-        Self(buf)
+        Self(attributes.into_values().flatten().collect())
     }
 }
 
@@ -137,7 +126,7 @@ fn merge<M: MergeableRequest>(payloads: &VecDeque<Bytes>) -> M {
             }
         };
         for item in req.into_items() {
-            let id = ResourceIdentity::from_resource(M::resource(&item));
+            let id = M::resource(&item).map_or_else(Default::default, Into::into);
             match groups.entry(id) {
                 Entry::Occupied(mut e) => {
                     M::extend_scopes(e.get_mut(), item);
