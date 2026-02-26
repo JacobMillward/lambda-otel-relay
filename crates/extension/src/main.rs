@@ -60,7 +60,8 @@ async fn main() {
         .await
         .unwrap_or_else(|e| fatal("failed to register extension", &e));
 
-    let mut event_loop = EventLoop::new(&ext, &config)
+    let exporter = exporter::OtlpExporter::new(&config);
+    let mut event_loop = EventLoop::new(&ext, exporter, &config)
         .await
         .unwrap_or_else(|e| fatal("failed to start event loop", &e));
 

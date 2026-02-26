@@ -9,7 +9,7 @@ use tracing::{debug, error};
 
 use crate::buffers::{BufferData, Signal};
 use crate::config::Config;
-use crate::exporter;
+use crate::exporter::Exporter;
 use crate::extensions_api::{self, ApiError, ExtensionsApi, ExtensionsApiEvent};
 use crate::telemetry_listener::TelemetryEvent;
 use crate::{otlp_listener, telemetry_listener};
@@ -18,9 +18,9 @@ use crate::{otlp_listener, telemetry_listener};
 ///
 /// Constructed in `main()` after registration, then driven by `run()`.
 /// Listener tasks are joined during shutdown to allow in-flight handlers to complete.
-pub struct EventLoop<'a, A: ExtensionsApi> {
+pub struct EventLoop<'a, A: ExtensionsApi, E: Exporter> {
     api: &'a A,
-    exporter: exporter::Exporter,
+    exporter: E,
     buffer: BufferData,
     buffer_max_bytes: Option<usize>,
     otlp_rx: mpsc::Receiver<(Signal, Bytes)>,
@@ -31,10 +31,14 @@ pub struct EventLoop<'a, A: ExtensionsApi> {
     next_event_fut: ReusableBoxFuture<'a, Result<ExtensionsApiEvent, ApiError>>,
 }
 
-impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
+impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
     /// Bind both listeners, register with the Telemetry API, and spawn
     /// the OTLP and telemetry server tasks.
-    pub async fn new(api: &'a A, config: &Config) -> Result<Self, extensions_api::ApiError> {
+    pub async fn new(
+        api: &'a A,
+        exporter: E,
+        config: &Config,
+    ) -> Result<Self, extensions_api::ApiError> {
         let cancel = CancellationToken::new();
         let (otlp_tx, otlp_rx) = mpsc::channel::<(Signal, Bytes)>(128);
         let (telemetry_tx, telemetry_rx) = mpsc::channel::<TelemetryEvent>(64);
@@ -57,7 +61,7 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
 
         Ok(Self {
             api,
-            exporter: exporter::Exporter::new(config),
+            exporter,
             buffer: BufferData::new(),
             buffer_max_bytes: config.buffer_max_bytes,
             otlp_rx,
@@ -182,7 +186,19 @@ mod tests {
     use tokio::sync::{Mutex, Notify};
 
     use super::*;
+    use crate::exporter::{ExportError, Exporter};
     use crate::extensions_api::ApiError;
+
+    struct MockExporter;
+
+    impl Exporter for MockExporter {
+        async fn export(&self, data: &mut BufferData) -> Result<(), ExportError> {
+            data.traces.clear();
+            data.metrics.clear();
+            data.logs.clear();
+            Ok(())
+        }
+    }
 
     struct MockApiState {
         next_event_calls: AtomicU32,
@@ -256,7 +272,7 @@ mod tests {
         })]);
 
         let config = dummy_config();
-        let mut event_loop = EventLoop::new(&mock, &config).await.unwrap();
+        let mut event_loop = EventLoop::new(&mock, MockExporter, &config).await.unwrap();
 
         // Send 2 OTLP payloads via HTTP to trigger the channel branch of select!.
         // The listener is already bound and accepting, so these are queued
