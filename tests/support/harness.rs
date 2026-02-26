@@ -193,7 +193,7 @@ impl Harness {
         for attempt in 1..=MAX_ATTEMPTS {
             match f().await {
                 Ok(resp) => return Ok(resp),
-                Err(e) if e.is_connect() && attempt < MAX_ATTEMPTS => {
+                Err(e) if Self::is_transient(&e) && attempt < MAX_ATTEMPTS => {
                     last_err = Some(e);
                     tokio::time::sleep(RETRY_DELAY).await;
                 }
@@ -201,6 +201,28 @@ impl Harness {
             }
         }
         Err(last_err.unwrap())
+    }
+
+    /// Check whether a reqwest error is a transient connection-class error
+    /// worth retrying. The IO error may be nested several layers deep
+    /// (reqwest -> hyper_util -> hyper -> io), so we walk the full source chain.
+    fn is_transient(err: &reqwest::Error) -> bool {
+        use std::error::Error;
+        use std::io::ErrorKind;
+
+        let mut source = err.source();
+        while let Some(e) = source {
+            if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                return matches!(
+                    io_err.kind(),
+                    ErrorKind::ConnectionReset
+                        | ErrorKind::ConnectionRefused
+                        | ErrorKind::BrokenPipe
+                );
+            }
+            source = e.source();
+        }
+        false
     }
 
     /// Stream both stdout and stderr until the target message has appeared `n`
