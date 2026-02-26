@@ -1,4 +1,5 @@
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use tokio::net::TcpListener;
@@ -7,7 +8,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::{CancellationToken, ReusableBoxFuture};
 use tracing::{debug, error};
 
-use crate::buffers::{BufferData, Signal};
+use crate::buffers::{OutboundBuffer, Signal};
 use crate::config::Config;
 use crate::exporter::Exporter;
 use crate::extensions_api::{self, ApiError, ExtensionsApi, ExtensionsApiEvent};
@@ -20,9 +21,8 @@ use crate::{otlp_listener, telemetry_listener};
 /// Listener tasks are joined during shutdown to allow in-flight handlers to complete.
 pub struct EventLoop<'a, A: ExtensionsApi, E: Exporter> {
     api: &'a A,
-    exporter: E,
-    buffer: BufferData,
-    buffer_max_bytes: Option<usize>,
+    exporter: Arc<E>,
+    buffer: OutboundBuffer,
     otlp_rx: mpsc::Receiver<(Signal, Bytes)>,
     telemetry_rx: mpsc::Receiver<TelemetryEvent>,
     cancel: CancellationToken,
@@ -61,9 +61,8 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
 
         Ok(Self {
             api,
-            exporter,
-            buffer: BufferData::new(),
-            buffer_max_bytes: config.buffer_max_bytes,
+            exporter: Arc::new(exporter),
+            buffer: OutboundBuffer::new(config.buffer_max_bytes),
             otlp_rx,
             telemetry_rx,
             cancel,
@@ -78,17 +77,6 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
         loop {
             if let ControlFlow::Break(()) = self.tick().await {
                 break;
-            }
-        }
-    }
-
-    /// Flush the buffer to the collector. If the flush fails, evict oldest
-    /// entries until the buffer is at or below `buffer_max_bytes`.
-    async fn flush_and_evict(&mut self) {
-        if let Err(e) = self.exporter.export(&mut self.buffer).await {
-            error!(error = %e, "flush failed");
-            if let Some(max) = self.buffer_max_bytes {
-                self.buffer.evict_to(max);
             }
         }
     }
@@ -111,14 +99,12 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
                         debug!(request_id, "Received invoke event");
-                        // TODO: record invocation metadata in state map
-
-                        // Post-invocation flush: export buffered data from previous invocation
-                        self.flush_and_evict().await;
+                        self.buffer.flush(&*self.exporter).await;
                     }
                     Ok(ExtensionsApiEvent::Shutdown { reason }) => {
                         debug!(reason, "Received shutdown event");
                         self.cancel.cancel();
+                        self.buffer.join_flush_task().await;
 
                         // Wait for listener tasks to finish in-flight handlers.
                         // Once they exit, their channel senders are dropped.
@@ -130,11 +116,9 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                             self.buffer.push(signal, payload);
                         }
 
-                        // Best-effort flush only — no eviction on failure since the
-                        // process is exiting and the data would be lost either way.
-                        if let Err(e) = self.exporter.export(&mut self.buffer).await {
-                            error!(error = %e, "shutdown flush failed");
-                        }
+                        // Best-effort final flush. prepend_failed inside flush is
+                        // harmless — the buffer is about to be dropped.
+                        self.buffer.flush(&*self.exporter).await;
 
                         return ControlFlow::Break(());
                     }
@@ -146,17 +130,8 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
             }
             Some((signal, payload)) = self.otlp_rx.recv() => {
                 self.buffer.push(signal, payload);
-                // TODO: race flush trigger (mid-invocation background flush)
-                //
-                // Threshold flush: blocks the event loop for up to `export_timeout`.
-                // While blocked, the otlp_rx channel backfills (capacity 128); once
-                // full, OTLP HTTP handlers stall until the flush completes, causing
-                // latency spikes on the instrumented application's OTLP calls.
-                // Acceptable for now — a background flush strategy will decouple this.
-                if let Some(max) = self.buffer_max_bytes {
-                    if self.buffer.total_size_bytes() > max {
-                        self.flush_and_evict().await;
-                    }
+                if self.buffer.over_threshold() {
+                    self.buffer.spawn_flush(&self.exporter);
                 }
             }
             Some(event) = self.telemetry_rx.recv() => {
@@ -186,6 +161,7 @@ mod tests {
     use tokio::sync::{Mutex, Notify};
 
     use super::*;
+    use crate::buffers::BufferData;
     use crate::exporter::{ExportError, Exporter};
     use crate::extensions_api::ApiError;
 

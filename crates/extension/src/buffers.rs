@@ -1,7 +1,14 @@
 use std::collections::VecDeque;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 
 use bytes::Bytes;
-use tracing::warn;
+use tokio::task::JoinHandle;
+use tracing::{error, warn};
+
+use crate::exporter::Exporter;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Signal {
@@ -134,6 +141,125 @@ impl BufferData {
         if dropped_count[2] > 0 {
             warn!(bytes = dropped_bytes[2], count = dropped_count[2], "evicted logs data from buffer");
         }
+    }
+}
+
+/// Internal state behind the single mutex — data and flush task together,
+/// so there is no lock ordering to get wrong.
+struct BufferState {
+    data: BufferData,
+    flush_task: Option<JoinHandle<()>>,
+}
+
+/// Shared wrapper around `BufferData` that manages flush lifecycle.
+///
+/// Uses `std::sync::Mutex` (not tokio) because the lock is never held across
+/// `.await` — all operations are sub-microsecond field swaps.
+#[derive(Clone)]
+pub struct OutboundBuffer {
+    state: Arc<Mutex<BufferState>>,
+    max_bytes: Option<usize>,
+}
+
+impl OutboundBuffer {
+    pub fn new(max_bytes: Option<usize>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(BufferState {
+                data: BufferData::new(),
+                flush_task: None,
+            })),
+            max_bytes,
+        }
+    }
+
+    pub fn push(&self, signal: Signal, payload: Bytes) {
+        self.state.lock().unwrap().data.push(signal, payload);
+    }
+
+    /// Returns true if `max_bytes` is set and the buffer exceeds it.
+    pub fn over_threshold(&self) -> bool {
+        match self.max_bytes {
+            Some(max) => self.state.lock().unwrap().data.total_size_bytes() > max,
+            None => false,
+        }
+    }
+
+    /// Take all data out of the buffer, leaving it empty.
+    pub fn take(&self) -> BufferData {
+        std::mem::take(&mut self.state.lock().unwrap().data)
+    }
+
+    /// Prepend failed export data back into the buffer and evict if over capacity.
+    /// No-op if `data` is empty.
+    fn prepend_failed(&self, data: BufferData) {
+        if data.is_empty() {
+            return;
+        }
+        let mut guard = self.state.lock().unwrap();
+        guard.data.prepend(data);
+        if let Some(max) = self.max_bytes {
+            guard.data.evict_to(max);
+        }
+    }
+
+    /// Spawn a background flush. No-op if a flush is already in-flight or buffer is empty.
+    pub fn spawn_flush<E: Exporter>(&self, exporter: &Arc<E>) {
+        let mut guard = self.state.lock().unwrap();
+
+        // Skip if a flush is already in-flight
+        if let Some(handle) = guard.flush_task.as_ref()
+            && !handle.is_finished()
+        {
+            return;
+        }
+
+        // Join the finished task to surface panics before overwriting.
+        if let Some(mut handle) = guard.flush_task.take() {
+            let waker = Waker::noop();
+            let mut cx = Context::from_waker(waker);
+            if let Poll::Ready(Err(e)) = Pin::new(&mut handle).poll(&mut cx) {
+                error!(error = %e, "background flush task panicked");
+            }
+        }
+
+        let mut snapshot = std::mem::take(&mut guard.data);
+        if snapshot.is_empty() {
+            return;
+        }
+
+        let exporter = Arc::clone(exporter);
+        let buffer = self.clone();
+
+        guard.flush_task = Some(tokio::spawn(async move {
+            if let Err(e) = exporter.export(&mut snapshot).await {
+                error!(error = %e, "background flush failed");
+            }
+            // Prepend any remaining data (failed signals). No-op if export cleared everything.
+            buffer.prepend_failed(snapshot);
+        }));
+    }
+
+    /// Join any in-flight background flush to completion.
+    pub async fn join_flush_task(&self) {
+        let handle = self.state.lock().unwrap().flush_task.take();
+        if let Some(h) = handle
+            && let Err(e) = h.await
+        {
+            error!(error = %e, "background flush task panicked");
+        }
+    }
+
+    /// Synchronous flush: join in-flight background flush, then take + export + handle failures.
+    pub async fn flush<E: Exporter>(&self, exporter: &E) {
+        self.join_flush_task().await;
+        let mut snapshot = self.take();
+        if snapshot.is_empty() {
+            return;
+        }
+        if let Err(e) = exporter.export(&mut snapshot).await {
+            error!(error = %e, "flush failed");
+        }
+        self.prepend_failed(snapshot);
     }
 }
 
