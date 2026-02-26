@@ -17,7 +17,7 @@ use crate::{otlp_listener, telemetry_listener};
 /// Owns all state for the extension's main select! loop.
 ///
 /// Constructed in `main()` after registration, then driven by `run()`.
-/// Spawned listener tasks are aborted on drop.
+/// Listener tasks are joined during shutdown to allow in-flight handlers to complete.
 pub struct EventLoop<'a, A: ExtensionsApi> {
     api: &'a A,
     exporter: exporter::Exporter,
@@ -105,9 +105,13 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
                         debug!(reason, "Received shutdown event");
                         self.cancel.cancel();
 
+                        // Wait for listener tasks to finish in-flight handlers.
+                        // Once they exit, their channel senders are dropped.
+                        let _ = (&mut self.otlp_task).await;
+                        let _ = (&mut self.telemetry_task).await;
+
                         // Drain any payloads still in the channel
-                        self.otlp_rx.close();
-                        while let Some((signal, payload)) = self.otlp_rx.recv().await {
+                        while let Ok((signal, payload)) = self.otlp_rx.try_recv() {
                             self.buffer.push(signal, payload);
                         }
 
@@ -143,13 +147,6 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
             }
         }
         ControlFlow::Continue(())
-    }
-}
-
-impl<A: ExtensionsApi> Drop for EventLoop<'_, A> {
-    fn drop(&mut self) {
-        self.otlp_task.abort();
-        self.telemetry_task.abort();
     }
 }
 
