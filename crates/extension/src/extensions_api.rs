@@ -1,9 +1,12 @@
 #![allow(clippy::question_mark)] // nanoserde DeJson derive
 
+use std::fmt;
 use std::future::Future;
 
 use nanoserde::DeJson;
 use thiserror::Error;
+
+use crate::config::ConfigError;
 
 const EXTENSION_NAME: &str = "lambda-otel-relay";
 
@@ -27,6 +30,51 @@ pub enum ApiError {
     UnknownExtensionsApiEventType(String),
     #[error("telemetry API registration failed: HTTP {status} — {body}")]
     TelemetryRegistrationFailed { status: u16, body: String },
+    #[error("init failed: {0}")]
+    InitFailed(String),
+    #[error("AWS_LAMBDA_RUNTIME_API not set")]
+    MissingRuntimeApi,
+}
+
+/// Errors reported to the Extensions API via `/extension/init/error`.
+#[derive(Debug, Error)]
+pub enum InitError {
+    #[error("{0}")]
+    Config(#[from] ConfigError),
+    #[error("{0}")]
+    ListenerBind(ApiError),
+}
+
+impl InitError {
+    fn error_type(&self) -> &'static str {
+        match self {
+            InitError::Config(_) => "Extension.ConfigInvalid",
+            InitError::ListenerBind(_) => "Extension.InitFailed",
+        }
+    }
+}
+
+/// Errors reported to the Extensions API via `/extension/exit/error`.
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum ExitError {
+    RuntimeFailure(String),
+}
+
+impl fmt::Display for ExitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExitError::RuntimeFailure(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl ExitError {
+    fn error_type(&self) -> &'static str {
+        match self {
+            ExitError::RuntimeFailure(_) => "Extension.RuntimeFailure",
+        }
+    }
 }
 
 #[derive(DeJson)]
@@ -62,7 +110,11 @@ pub struct ExtensionApiClient {
 }
 
 impl ExtensionApiClient {
-    pub async fn register(runtime_api: &str) -> Result<Self, ApiError> {
+    /// Read `AWS_LAMBDA_RUNTIME_API` from the environment and register the
+    /// extension with the Lambda Extensions API.
+    pub async fn register() -> Result<Self, ApiError> {
+        let runtime_api =
+            std::env::var("AWS_LAMBDA_RUNTIME_API").map_err(|_| ApiError::MissingRuntimeApi)?;
         let client = reqwest::Client::new();
         let extensions_url = format!("http://{runtime_api}/2020-01-01/extension");
 
@@ -92,9 +144,49 @@ impl ExtensionApiClient {
 
         Ok(Self {
             client,
-            runtime_api: runtime_api.to_owned(),
+            runtime_api,
             ext_id,
         })
+    }
+
+    /// Report an init error to the Lambda Extensions API.
+    /// Called when the extension fails to initialize after registration.
+    pub async fn report_init_error(&self, error: &InitError) {
+        let error_type = error.error_type();
+        let message = error.to_string();
+        let url = format!(
+            "http://{}/2020-01-01/extension/init/error",
+            self.runtime_api
+        );
+        let body = format!(r#"{{"errorMessage":"{message}","errorType":"{error_type}"}}"#);
+        let _ = self
+            .client
+            .post(&url)
+            .header("Lambda-Extension-Identifier", &self.ext_id)
+            .header("Lambda-Extension-Function-Error-Type", error_type)
+            .body(body)
+            .send()
+            .await;
+    }
+
+    /// Report an exit error to the Lambda Extensions API before exiting.
+    #[allow(dead_code)]
+    pub async fn report_exit_error(&self, error: &ExitError) {
+        let error_type = error.error_type();
+        let message = error.to_string();
+        let url = format!(
+            "http://{}/2020-01-01/extension/exit/error",
+            self.runtime_api
+        );
+        let body = format!(r#"{{"errorMessage":"{message}","errorType":"{error_type}"}}"#);
+        let _ = self
+            .client
+            .post(&url)
+            .header("Lambda-Extension-Identifier", &self.ext_id)
+            .header("Lambda-Extension-Function-Error-Type", error_type)
+            .body(body)
+            .send()
+            .await;
     }
 }
 

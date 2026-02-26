@@ -45,11 +45,11 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
 
         let otlp_listener = TcpListener::bind(("127.0.0.1", config.listener_port))
             .await
-            .expect("failed to bind OTLP listener");
+            .map_err(|e| ApiError::InitFailed(format!("failed to bind OTLP listener: {e}")))?;
 
         let telemetry_listener = TcpListener::bind(("0.0.0.0", config.telemetry_port))
             .await
-            .expect("failed to bind telemetry listener");
+            .map_err(|e| ApiError::InitFailed(format!("failed to bind telemetry listener: {e}")))?;
         api.register_telemetry(config.telemetry_port).await?;
 
         let otlp_task = tokio::spawn(otlp_listener::serve(otlp_listener, otlp_tx, cancel.clone()));
