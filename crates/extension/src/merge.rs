@@ -290,6 +290,25 @@ mod tests {
     }
 
     #[test]
+    fn empty_attributes_and_none_resource_merge_together() {
+        let empty_attrs = resource(vec![]);
+        let payload1 = trace_request(vec![resource_spans(empty_attrs, 1)]);
+        let payload2 = trace_request(vec![resource_spans(None, 2)]);
+
+        let mut queue = VecDeque::new();
+        queue.push_back(payload1);
+        queue.push_back(payload2);
+
+        let merged = merge_traces(&queue);
+        assert_eq!(
+            merged.resource_spans.len(),
+            1,
+            "empty-attributes and None resource should produce the same identity"
+        );
+        assert_eq!(merged.resource_spans[0].scope_spans.len(), 3);
+    }
+
+    #[test]
     fn empty_payloads_produce_empty_request() {
         let queue = VecDeque::new();
         let merged = merge_traces(&queue);
