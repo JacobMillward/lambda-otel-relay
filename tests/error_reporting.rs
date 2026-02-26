@@ -1,3 +1,8 @@
+// Note: exit errors (listener task crashes) are tested at the unit level in
+// event_loop::tests::otlp_listener_crash_returns_exit_error. An integration
+// test would require injecting a runtime panic into a spawned task, which
+// isn't feasible without test-only code in the production binary.
+
 mod support;
 
 use support::harness::LambdaTest;

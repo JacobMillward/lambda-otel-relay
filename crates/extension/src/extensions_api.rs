@@ -56,7 +56,6 @@ impl InitError {
 
 /// Errors reported to the Extensions API via `/extension/exit/error`.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum ExitError {
     RuntimeFailure(String),
 }
@@ -170,7 +169,6 @@ impl ExtensionApiClient {
     }
 
     /// Report an exit error to the Lambda Extensions API before exiting.
-    #[allow(dead_code)]
     pub async fn report_exit_error(&self, error: &ExitError) {
         let error_type = error.error_type();
         let message = error.to_string();

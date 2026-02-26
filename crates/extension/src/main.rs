@@ -75,5 +75,12 @@ async fn main() {
         }
     };
 
-    event_loop.run().await;
+    match event_loop.run().await {
+        Ok(()) => {}
+        Err(e) => {
+            error!(%e, "runtime error");
+            ext.report_exit_error(&e).await;
+            std::process::exit(1);
+        }
+    }
 }
