@@ -124,15 +124,17 @@ impl Harness {
             .await
             .expect("Failed to get mapped port");
 
-        let resp = reqwest::Client::new()
-            .post(format!(
-                "http://127.0.0.1:{host_port}/2015-03-31/functions/function/invocations"
-            ))
-            .header("Content-Type", "application/json")
-            .body(scenario.to_json())
-            .send()
-            .await
-            .expect("Failed to invoke Lambda function");
+        let resp = Self::with_retry(|| {
+            reqwest::Client::new()
+                .post(format!(
+                    "http://127.0.0.1:{host_port}/2015-03-31/functions/function/invocations"
+                ))
+                .header("Content-Type", "application/json")
+                .body(scenario.to_json())
+                .send()
+        })
+        .await
+        .expect("Failed to invoke Lambda function");
 
         let body = resp.text().await.expect("Failed to read response body");
 
@@ -175,6 +177,30 @@ impl Harness {
             stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
             stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
         }
+    }
+
+    /// Retry a request future on transient connection errors (reset, refused).
+    /// Returns the inner `Result` so the caller can `.expect()` as before.
+    async fn with_retry<F, Fut>(mut f: F) -> Result<reqwest::Response, reqwest::Error>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
+    {
+        const MAX_ATTEMPTS: u32 = 4;
+        const RETRY_DELAY: Duration = Duration::from_millis(250);
+
+        let mut last_err = None;
+        for attempt in 1..=MAX_ATTEMPTS {
+            match f().await {
+                Ok(resp) => return Ok(resp),
+                Err(e) if e.is_connect() && attempt < MAX_ATTEMPTS => {
+                    last_err = Some(e);
+                    tokio::time::sleep(RETRY_DELAY).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap())
     }
 
     /// Stream both stdout and stderr until the target message has appeared `n`
