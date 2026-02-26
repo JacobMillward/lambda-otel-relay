@@ -8,7 +8,7 @@ use reqwest::Client;
 use thiserror::Error;
 use url::Url;
 
-use crate::buffers::OutboundBuffer;
+use crate::buffers::BufferData;
 use crate::config::{Compression, Config};
 use crate::merge;
 
@@ -46,7 +46,7 @@ impl Exporter {
         }
     }
 
-    pub async fn export(&self, buffer: &mut OutboundBuffer) -> Result<(), ExportError> {
+    pub async fn export(&self, buffer: &mut BufferData) -> Result<(), ExportError> {
         if buffer.is_empty() {
             return Ok(());
         }

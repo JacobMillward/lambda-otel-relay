@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::{CancellationToken, ReusableBoxFuture};
 use tracing::{debug, error};
 
-use crate::buffers::{OutboundBuffer, Signal};
+use crate::buffers::{BufferData, Signal};
 use crate::config::Config;
 use crate::exporter;
 use crate::extensions_api::{self, ApiError, ExtensionsApi, ExtensionsApiEvent};
@@ -21,7 +21,7 @@ use crate::{otlp_listener, telemetry_listener};
 pub struct EventLoop<'a, A: ExtensionsApi> {
     api: &'a A,
     exporter: exporter::Exporter,
-    buffer: OutboundBuffer,
+    buffer: BufferData,
     buffer_max_bytes: Option<usize>,
     otlp_rx: mpsc::Receiver<(Signal, Bytes)>,
     telemetry_rx: mpsc::Receiver<TelemetryEvent>,
@@ -58,7 +58,7 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
         Ok(Self {
             api,
             exporter: exporter::Exporter::new(config),
-            buffer: OutboundBuffer::new(),
+            buffer: BufferData::new(),
             buffer_max_bytes: config.buffer_max_bytes,
             otlp_rx,
             telemetry_rx,

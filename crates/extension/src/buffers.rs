@@ -36,16 +36,27 @@ impl SignalBuffer {
             0
         }
     }
+
+    /// Prepend older data in front of current data.
+    /// After this call, `self` contains `[older..., self...]`.
+    fn prepend(&mut self, mut older: SignalBuffer) {
+        // append drains self.queue into older.queue, leaving self.queue empty.
+        // self.size_bytes is stale after this line, but `*self = older` below
+        // replaces self entirely so the stale value is never observed.
+        older.queue.append(&mut self.queue);
+        older.size_bytes += self.size_bytes;
+        *self = older;
+    }
 }
 
 #[derive(Default)]
-pub struct OutboundBuffer {
+pub struct BufferData {
     pub traces: SignalBuffer,
     pub metrics: SignalBuffer,
     pub logs: SignalBuffer,
 }
 
-impl OutboundBuffer {
+impl BufferData {
     pub fn new() -> Self {
         Self::default()
     }
@@ -66,6 +77,13 @@ impl OutboundBuffer {
 
     pub fn total_size_bytes(&self) -> usize {
         self.traces.size_bytes + self.metrics.size_bytes + self.logs.size_bytes
+    }
+
+    /// Prepend older data in front of current data for all signals.
+    pub fn prepend(&mut self, older: Self) {
+        self.traces.prepend(older.traces);
+        self.metrics.prepend(older.metrics);
+        self.logs.prepend(older.logs);
     }
 
     /// Round-robin evict oldest entries (traces -> metrics -> logs -> repeat)
@@ -125,7 +143,7 @@ mod tests {
 
     #[test]
     fn push_to_traces() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         buf.push(Signal::Traces, Bytes::from("trace1"));
         buf.push(Signal::Traces, Bytes::from("trace2"));
         assert_eq!(buf.traces.queue.len(), 2);
@@ -134,7 +152,7 @@ mod tests {
 
     #[test]
     fn push_to_metrics() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         buf.push(Signal::Metrics, Bytes::from("metric1"));
         assert_eq!(buf.metrics.queue.len(), 1);
         assert_eq!(buf.metrics.size_bytes, "metric1".len());
@@ -142,7 +160,7 @@ mod tests {
 
     #[test]
     fn push_to_logs() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         buf.push(Signal::Logs, Bytes::from("log1"));
         buf.push(Signal::Logs, Bytes::from("log2"));
         buf.push(Signal::Logs, Bytes::from("log3"));
@@ -155,7 +173,7 @@ mod tests {
 
     #[test]
     fn signal_buffer_clear() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         buf.push(Signal::Traces, Bytes::from("t1"));
         buf.push(Signal::Traces, Bytes::from("t2"));
         buf.traces.clear();
@@ -165,15 +183,15 @@ mod tests {
 
     #[test]
     fn signal_buffer_is_empty() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         assert!(buf.traces.is_empty());
         buf.push(Signal::Traces, Bytes::from("t1"));
         assert!(!buf.traces.is_empty());
     }
 
     #[test]
-    fn outbound_buffer_is_empty() {
-        let mut buf = OutboundBuffer::new();
+    fn buffer_data_is_empty() {
+        let mut buf = BufferData::new();
         assert!(buf.is_empty());
         buf.push(Signal::Metrics, Bytes::from("m"));
         assert!(!buf.is_empty());
@@ -181,7 +199,7 @@ mod tests {
 
     #[test]
     fn total_size_bytes() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         assert_eq!(buf.total_size_bytes(), 0);
         buf.push(Signal::Traces, Bytes::from("aaaa")); // 4
         buf.push(Signal::Metrics, Bytes::from("bb")); // 2
@@ -191,7 +209,7 @@ mod tests {
 
     #[test]
     fn evict_oldest_removes_front() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         buf.push(Signal::Traces, Bytes::from("first"));
         buf.push(Signal::Traces, Bytes::from("second"));
         let freed = buf.traces.evict_oldest();
@@ -203,13 +221,13 @@ mod tests {
 
     #[test]
     fn evict_oldest_empty_returns_zero() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         assert_eq!(buf.traces.evict_oldest(), 0);
     }
 
     #[test]
     fn evict_to_stops_at_threshold() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         buf.push(Signal::Traces, Bytes::from("aaaa")); // 4
         buf.push(Signal::Traces, Bytes::from("bbbb")); // 4
         buf.push(Signal::Traces, Bytes::from("cccc")); // 4
@@ -221,7 +239,7 @@ mod tests {
 
     #[test]
     fn evict_to_round_robins_across_signals() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         // 10 bytes each signal = 30 total
         buf.push(Signal::Traces, Bytes::from("tttttttttt"));
         buf.push(Signal::Metrics, Bytes::from("mmmmmmmmmm"));
@@ -234,7 +252,7 @@ mod tests {
 
     #[test]
     fn evict_to_noop_when_under_threshold() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         buf.push(Signal::Traces, Bytes::from("aa")); // 2
         buf.evict_to(100);
         assert_eq!(buf.total_size_bytes(), 2);
@@ -243,7 +261,7 @@ mod tests {
 
     #[test]
     fn evict_to_single_signal_only() {
-        let mut buf = OutboundBuffer::new();
+        let mut buf = BufferData::new();
         buf.push(Signal::Logs, Bytes::from("aaaa")); // 4
         buf.push(Signal::Logs, Bytes::from("bbbb")); // 4
         buf.push(Signal::Logs, Bytes::from("cccc")); // 4
