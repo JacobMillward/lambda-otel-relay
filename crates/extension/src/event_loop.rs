@@ -176,6 +176,32 @@ mod tests {
         }
     }
 
+    struct FailingExporter;
+
+    impl Exporter for FailingExporter {
+        async fn export(&self, _data: &mut BufferData) -> Result<(), ExportError> {
+            Err(ExportError::Rejected {
+                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            })
+        }
+    }
+
+    /// Simulates partial failure: traces export succeeds, metrics fails.
+    struct PartialFailExporter;
+
+    impl Exporter for PartialFailExporter {
+        async fn export(&self, data: &mut BufferData) -> Result<(), ExportError> {
+            // Traces succeed — clear them
+            data.traces.clear();
+            // Metrics fail — leave them untouched
+            // Logs succeed — clear them
+            data.logs.clear();
+            Err(ExportError::Rejected {
+                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            })
+        }
+    }
+
     struct MockApiState {
         next_event_calls: AtomicU32,
         release: Notify,
@@ -279,5 +305,102 @@ mod tests {
             1,
             "next_event must be called exactly once — the future must not be dropped and recreated"
         );
+    }
+
+    #[tokio::test]
+    async fn failed_flush_prepends_data_back() {
+        let buffer = OutboundBuffer::new(Some(1_000_000));
+        buffer.push(Signal::Traces, Bytes::from("trace_data"));
+        buffer.push(Signal::Metrics, Bytes::from("metric_data"));
+
+        let exporter = Arc::new(FailingExporter);
+        buffer.spawn_flush(&exporter);
+        buffer.join_flush_task().await;
+
+        // Data should be prepended back since export failed
+        let data = buffer.take();
+        assert!(!data.is_empty());
+        assert_eq!(data.traces.queue.len(), 1);
+        assert_eq!(data.traces.queue[0], Bytes::from("trace_data"));
+        assert_eq!(data.metrics.queue.len(), 1);
+        assert_eq!(data.metrics.queue[0], Bytes::from("metric_data"));
+    }
+
+    #[tokio::test]
+    async fn sync_flush_joins_background_task() {
+        let buffer = OutboundBuffer::new(None);
+        buffer.push(Signal::Traces, Bytes::from("data"));
+
+        let exporter = Arc::new(MockExporter);
+
+        // Spawn a background flush
+        buffer.spawn_flush(&exporter);
+
+        // Push more data while background flush is (potentially) in-flight
+        buffer.push(Signal::Logs, Bytes::from("new_data"));
+
+        // Sync flush should join the background task, then flush remaining
+        buffer.flush(&*exporter).await;
+
+        assert!(buffer.take().is_empty());
+    }
+
+    #[tokio::test]
+    async fn partial_failure_preserves_only_failed_signals() {
+        let buffer = OutboundBuffer::new(None);
+        buffer.push(Signal::Traces, Bytes::from("trace_data"));
+        buffer.push(Signal::Metrics, Bytes::from("metric_data"));
+        buffer.push(Signal::Logs, Bytes::from("log_data"));
+
+        let exporter = Arc::new(PartialFailExporter);
+        buffer.spawn_flush(&exporter);
+        buffer.join_flush_task().await;
+
+        // Only metrics should remain — traces and logs were cleared by the exporter
+        let data = buffer.take();
+        assert!(data.traces.is_empty());
+        assert_eq!(data.metrics.queue.len(), 1);
+        assert_eq!(data.metrics.queue[0], Bytes::from("metric_data"));
+        assert!(data.logs.is_empty());
+    }
+
+    /// Verify that the OTLP receive → threshold → spawn_flush path works
+    /// end-to-end through `tick()`.
+    #[tokio::test]
+    async fn threshold_triggers_background_flush_via_tick() {
+        let (mock, state) = MockApi::new(vec![Ok(ExtensionsApiEvent::Shutdown {
+            reason: "test".into(),
+        })]);
+
+        // Use different ports to avoid collisions with other event loop tests
+        let mut config = dummy_config();
+        config.listener_port = 14320;
+        config.telemetry_port = 14321;
+        config.buffer_max_bytes = Some(1);
+
+        let mut event_loop = EventLoop::new(&mock, MockExporter, &config).await.unwrap();
+
+        // Send a payload that exceeds the 1-byte threshold
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!(
+                "http://127.0.0.1:{}/v1/traces",
+                config.listener_port
+            ))
+            .body(b"\x0a\x00".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // This tick receives the payload and should trigger spawn_flush
+        let _ = event_loop.tick().await;
+
+        // Send shutdown to cleanly exit
+        state.release.notify_one();
+        let _ = event_loop.tick().await;
+
+        // Buffer should be empty — the background flush exported everything
+        assert!(event_loop.buffer.take().is_empty());
     }
 }
