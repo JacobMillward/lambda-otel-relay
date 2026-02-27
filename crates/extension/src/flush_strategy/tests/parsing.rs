@@ -100,6 +100,27 @@ fn parse_continuously_zero() {
 }
 
 #[test]
+fn display_roundtrips_through_parse() {
+    let cases: &[&str] = &[
+        "default",
+        "end",
+        "end,30000",
+        "periodically,60000",
+        "continuously,5000",
+    ];
+    for &input in cases {
+        let strategy = FlushStrategy::parse(input).unwrap();
+        let displayed = strategy.to_string();
+        let reparsed = FlushStrategy::parse(&displayed).unwrap();
+        assert_eq!(
+            displayed,
+            reparsed.to_string(),
+            "roundtrip failed for {input}"
+        );
+    }
+}
+
+#[test]
 fn parse_negative_interval_errors() {
     let err = FlushStrategy::parse("periodically,-5").unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
