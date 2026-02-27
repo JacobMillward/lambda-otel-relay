@@ -39,13 +39,13 @@ impl FlushStrategy {
                     interval: Duration::from_millis(ms),
                 })
             }
-            _ if raw.starts_with("periodically") => {
+            _ if raw.starts_with("periodically,") || raw == "periodically" => {
                 let ms = parse_ms_param("periodically", raw)?;
                 Ok(FlushStrategy::Periodically {
                     interval: Duration::from_millis(ms),
                 })
             }
-            _ if raw.starts_with("continuously") => {
+            _ if raw.starts_with("continuously,") || raw == "continuously" => {
                 let ms = parse_ms_param("continuously", raw)?;
                 Ok(FlushStrategy::Continuously {
                     interval: Duration::from_millis(ms),

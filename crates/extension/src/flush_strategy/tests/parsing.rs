@@ -27,6 +27,16 @@ fn parse_unknown_strategy_errors() {
 }
 
 #[test]
+fn parse_strategy_prefix_without_comma_is_unknown() {
+    // "periodicallyX" should be UnknownStrategy, not InvalidParameter
+    let err = FlushStrategy::parse("periodicallyX").unwrap_err();
+    assert!(matches!(err, FlushStrategyError::UnknownStrategy(_)));
+
+    let err = FlushStrategy::parse("continuouslyFoo").unwrap_err();
+    assert!(matches!(err, FlushStrategyError::UnknownStrategy(_)));
+}
+
+#[test]
 fn parse_periodically() {
     let strategy = FlushStrategy::parse("periodically,60000").unwrap();
     assert!(matches!(
