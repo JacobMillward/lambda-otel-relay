@@ -98,3 +98,15 @@ fn parse_continuously_zero() {
     let err = FlushStrategy::parse("continuously,0").unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 }
+
+#[test]
+fn parse_negative_interval_errors() {
+    let err = FlushStrategy::parse("periodically,-5").unwrap_err();
+    assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
+
+    let err = FlushStrategy::parse("end,-100").unwrap_err();
+    assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
+
+    let err = FlushStrategy::parse("continuously,-1").unwrap_err();
+    assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
+}
