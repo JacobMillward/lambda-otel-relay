@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::env;
+use std::path::Path;
 use std::time::Duration;
 
 use thiserror::Error;
@@ -29,6 +30,16 @@ pub enum ConfigError {
 
     #[error("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY: {0}")]
     FlushStrategy(#[from] FlushStrategyError),
+
+    #[error("{var}: cannot read file '{path}': {reason}")]
+    CertificateFile {
+        var: &'static str,
+        path: String,
+        reason: String,
+    },
+
+    #[error("LAMBDA_OTEL_RELAY_CLIENT_CERT and LAMBDA_OTEL_RELAY_CLIENT_KEY must both be set")]
+    ClientIdentityIncomplete,
 }
 
 #[derive(Debug)]
@@ -42,6 +53,9 @@ pub struct Config {
     pub export_headers: Vec<(String, String)>,
     pub buffer_max_bytes: Option<usize>,
     pub flush_strategy: FlushStrategy,
+    pub tls_ca: Option<Vec<u8>>,
+    pub tls_client_cert: Option<Vec<u8>>,
+    pub tls_client_key: Option<Vec<u8>>,
 }
 
 impl Config {
@@ -66,6 +80,14 @@ impl Config {
                 .unwrap_or(""),
         )?;
 
+        let tls_ca = parse_certificate_file(vars, "LAMBDA_OTEL_RELAY_CERTIFICATE")?;
+        let tls_client_cert = parse_certificate_file(vars, "LAMBDA_OTEL_RELAY_CLIENT_CERT")?;
+        let tls_client_key = parse_certificate_file(vars, "LAMBDA_OTEL_RELAY_CLIENT_KEY")?;
+
+        if tls_client_cert.is_some() != tls_client_key.is_some() {
+            return Err(ConfigError::ClientIdentityIncomplete);
+        }
+
         Ok(Self {
             endpoint,
             listener_port,
@@ -75,6 +97,9 @@ impl Config {
             export_headers,
             buffer_max_bytes,
             flush_strategy,
+            tls_ca,
+            tls_client_cert,
+            tls_client_key,
         })
     }
 }
@@ -144,6 +169,25 @@ fn parse_buffer_max_bytes(
             }
         }
         None => Ok(Some(4_194_304)), // 4 MiB default
+    }
+}
+
+fn parse_certificate_file(
+    vars: &HashMap<String, String>,
+    name: &'static str,
+) -> Result<Option<Vec<u8>>, ConfigError> {
+    match vars.get(name).filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(path_str) => {
+            let path = Path::new(path_str);
+            std::fs::read(path)
+                .map(Some)
+                .map_err(|e| ConfigError::CertificateFile {
+                    var: name,
+                    path: path_str.clone(),
+                    reason: e.to_string(),
+                })
+        }
     }
 }
 

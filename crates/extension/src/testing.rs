@@ -122,5 +122,8 @@ pub async fn dummy_config() -> crate::config::Config {
         export_headers: vec![],
         buffer_max_bytes: Some(4_194_304),
         flush_strategy: crate::flush_strategy::FlushStrategy::Default,
+        tls_ca: None,
+        tls_client_cert: None,
+        tls_client_key: None,
     }
 }

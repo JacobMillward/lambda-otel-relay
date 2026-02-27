@@ -7,6 +7,7 @@ use nanoserde::DeJson;
 use thiserror::Error;
 
 use crate::config::ConfigError;
+use crate::exporter::ExporterError;
 
 const EXTENSION_NAME: &str = "lambda-otel-relay";
 
@@ -43,6 +44,8 @@ pub enum InitError {
     Config(#[from] ConfigError),
     #[error("{0}")]
     ListenerBind(ApiError),
+    #[error("{0}")]
+    ExporterBuild(#[from] ExporterError),
 }
 
 impl InitError {
@@ -50,6 +53,7 @@ impl InitError {
         match self {
             InitError::Config(_) => "Extension.ConfigInvalid",
             InitError::ListenerBind(_) => "Extension.InitFailed",
+            InitError::ExporterBuild(_) => "Extension.ConfigInvalid",
         }
     }
 }
