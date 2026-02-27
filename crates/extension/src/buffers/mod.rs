@@ -98,29 +98,31 @@ impl BufferData {
     pub fn evict_to(&mut self, max_bytes: usize) {
         let mut dropped_bytes = [0usize; 3]; // traces, metrics, logs
         let mut dropped_count = [0usize; 3];
+        let mut total = self.total_size_bytes();
 
-        while self.total_size_bytes() > max_bytes {
+        while total > max_bytes {
             let mut any_evicted = false;
 
-            if self.total_size_bytes() > max_bytes {
-                let freed = self.traces.evict_oldest();
-                if freed > 0 {
-                    dropped_bytes[0] += freed;
-                    dropped_count[0] += 1;
-                    any_evicted = true;
-                }
+            let freed = self.traces.evict_oldest();
+            if freed > 0 {
+                total -= freed;
+                dropped_bytes[0] += freed;
+                dropped_count[0] += 1;
+                any_evicted = true;
             }
-            if self.total_size_bytes() > max_bytes {
+            if total > max_bytes {
                 let freed = self.metrics.evict_oldest();
                 if freed > 0 {
+                    total -= freed;
                     dropped_bytes[1] += freed;
                     dropped_count[1] += 1;
                     any_evicted = true;
                 }
             }
-            if self.total_size_bytes() > max_bytes {
+            if total > max_bytes {
                 let freed = self.logs.evict_oldest();
                 if freed > 0 {
+                    total -= freed;
                     dropped_bytes[2] += freed;
                     dropped_count[2] += 1;
                     any_evicted = true;
