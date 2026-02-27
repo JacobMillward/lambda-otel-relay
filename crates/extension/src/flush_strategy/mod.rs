@@ -19,16 +19,30 @@ pub enum FlushStrategyError {
 #[derive(Debug, Clone)]
 pub enum FlushStrategy {
     End,
+    EndPeriodically { interval: Duration },
     Periodically { interval: Duration },
+    Continuously { interval: Duration },
 }
 
 impl FlushStrategy {
     pub fn parse(raw: &str) -> Result<Self, FlushStrategyError> {
         match raw {
             "" | "end" => Ok(FlushStrategy::End),
+            _ if raw.starts_with("end,") => {
+                let ms = parse_ms_param("end", raw)?;
+                Ok(FlushStrategy::EndPeriodically {
+                    interval: Duration::from_millis(ms),
+                })
+            }
             _ if raw.starts_with("periodically") => {
                 let ms = parse_ms_param("periodically", raw)?;
                 Ok(FlushStrategy::Periodically {
+                    interval: Duration::from_millis(ms),
+                })
+            }
+            _ if raw.starts_with("continuously") => {
+                let ms = parse_ms_param("continuously", raw)?;
+                Ok(FlushStrategy::Continuously {
                     interval: Duration::from_millis(ms),
                 })
             }
@@ -41,8 +55,14 @@ impl fmt::Display for FlushStrategy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FlushStrategy::End => write!(f, "end"),
+            FlushStrategy::EndPeriodically { interval } => {
+                write!(f, "end,{}", interval.as_millis())
+            }
             FlushStrategy::Periodically { interval } => {
                 write!(f, "periodically,{}", interval.as_millis())
+            }
+            FlushStrategy::Continuously { interval } => {
+                write!(f, "continuously,{}", interval.as_millis())
             }
         }
     }
@@ -52,7 +72,6 @@ impl fmt::Display for FlushStrategy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimerMode {
     Sync,
-    #[allow(dead_code)] // used by default/continuously strategies
     Background,
 }
 
@@ -71,7 +90,9 @@ impl FlushCoordinator {
     pub fn new(strategy: FlushStrategy) -> Self {
         let timer = match &strategy {
             FlushStrategy::End => FlushTimer::Inactive,
-            FlushStrategy::Periodically { interval } => FlushTimer::Active {
+            FlushStrategy::EndPeriodically { interval }
+            | FlushStrategy::Periodically { interval }
+            | FlushStrategy::Continuously { interval } => FlushTimer::Active {
                 interval: build_interval(*interval),
             },
         };
@@ -98,8 +119,9 @@ impl FlushCoordinator {
             return false;
         }
         match &self.strategy {
-            FlushStrategy::End => true,
+            FlushStrategy::End | FlushStrategy::EndPeriodically { .. } => true,
             FlushStrategy::Periodically { interval } => self.elapsed_since_flush() >= *interval,
+            FlushStrategy::Continuously { .. } => false,
         }
     }
 
@@ -110,14 +132,19 @@ impl FlushCoordinator {
         }
         match &self.strategy {
             FlushStrategy::End => false,
-            FlushStrategy::Periodically { .. } => true,
+            FlushStrategy::EndPeriodically { .. }
+            | FlushStrategy::Periodically { .. }
+            | FlushStrategy::Continuously { .. } => true,
         }
     }
 
     /// The timer mode for this strategy (sync or background).
     pub fn timer_mode(&self) -> TimerMode {
         match &self.strategy {
-            FlushStrategy::End | FlushStrategy::Periodically { .. } => TimerMode::Sync,
+            FlushStrategy::End
+            | FlushStrategy::EndPeriodically { .. }
+            | FlushStrategy::Periodically { .. } => TimerMode::Sync,
+            FlushStrategy::Continuously { .. } => TimerMode::Background,
         }
     }
 
