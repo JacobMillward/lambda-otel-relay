@@ -121,5 +121,6 @@ pub async fn dummy_config() -> crate::config::Config {
         compression: crate::config::Compression::None,
         export_headers: vec![],
         buffer_max_bytes: Some(4_194_304),
+        flush_strategy: crate::flush_strategy::FlushStrategy::End,
     }
 }

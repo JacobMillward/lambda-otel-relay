@@ -215,3 +215,33 @@ fn empty_headers_returns_empty_vec() {
     .unwrap();
     assert!(config.export_headers.is_empty());
 }
+
+#[test]
+fn default_flush_strategy_is_end() {
+    let config = Config::parse(&vars(&[(
+        "LAMBDA_OTEL_RELAY_ENDPOINT",
+        "http://localhost:4318",
+    )]))
+    .unwrap();
+    assert!(matches!(config.flush_strategy, FlushStrategy::End));
+}
+
+#[test]
+fn explicit_end_flush_strategy() {
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "end"),
+    ]))
+    .unwrap();
+    assert!(matches!(config.flush_strategy, FlushStrategy::End));
+}
+
+#[test]
+fn invalid_flush_strategy() {
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "bogus"),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::FlushStrategy(_)));
+}

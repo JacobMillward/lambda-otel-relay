@@ -214,15 +214,16 @@ impl OutboundBuffer {
         }
     }
 
-    /// Spawn a background flush. No-op if a flush is already in-flight or buffer is empty.
-    pub fn spawn_flush<E: Exporter>(&self, exporter: &Arc<E>) {
+    /// Spawn a background flush. Returns `true` if a flush was spawned, `false` if
+    /// skipped (already in-flight or buffer empty).
+    pub fn spawn_flush<E: Exporter>(&self, exporter: &Arc<E>) -> bool {
         let mut guard = self.state.lock().unwrap();
 
         // Skip if a flush is already in-flight
         if let Some(handle) = guard.flush_task.as_ref()
             && !handle.is_finished()
         {
-            return;
+            return false;
         }
 
         // Join the finished task to surface panics before overwriting.
@@ -236,7 +237,7 @@ impl OutboundBuffer {
 
         let mut snapshot = std::mem::take(&mut guard.data);
         if snapshot.is_empty() {
-            return;
+            return false;
         }
 
         let exporter = Arc::clone(exporter);
@@ -249,6 +250,8 @@ impl OutboundBuffer {
             // Prepend any remaining data (failed signals). No-op if export cleared everything.
             buffer.prepend_failed(snapshot);
         }));
+
+        true
     }
 
     /// Join any in-flight background flush to completion.
