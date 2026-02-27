@@ -128,9 +128,7 @@ impl FlushCoordinator {
             return false;
         }
         match &self.strategy {
-            FlushStrategy::Default => {
-                self.elapsed_since_flush() >= DEFAULT_ADAPTIVE_THRESHOLD
-            }
+            FlushStrategy::Default => self.elapsed_since_flush() >= DEFAULT_ADAPTIVE_THRESHOLD,
             FlushStrategy::End | FlushStrategy::EndPeriodically { .. } => true,
             FlushStrategy::Periodically { interval } => self.elapsed_since_flush() >= *interval,
             FlushStrategy::Continuously { .. } => false,
@@ -152,11 +150,15 @@ impl FlushCoordinator {
     }
 
     /// The timer mode for this strategy (sync or background).
+    ///
+    /// Only meaningful when `should_flush_on_timer()` returns true.
+    /// For `End`, the timer is inactive and this method is never reached.
     pub fn timer_mode(&self) -> TimerMode {
         match &self.strategy {
-            FlushStrategy::End
-            | FlushStrategy::EndPeriodically { .. }
-            | FlushStrategy::Periodically { .. } => TimerMode::Sync,
+            FlushStrategy::End => unreachable!("End strategy has no timer"),
+            FlushStrategy::EndPeriodically { .. } | FlushStrategy::Periodically { .. } => {
+                TimerMode::Sync
+            }
             FlushStrategy::Default | FlushStrategy::Continuously { .. } => TimerMode::Background,
         }
     }
@@ -197,16 +199,18 @@ fn build_interval(period: Duration) -> Interval {
 /// Parse `"strategy,<ms>"` → ms as u64, validating the comma-separated parameter.
 fn parse_ms_param(strategy: &str, raw: &str) -> Result<u64, FlushStrategyError> {
     let param = raw.strip_prefix(strategy).unwrap_or("");
-    let param = param.strip_prefix(',').ok_or_else(|| {
-        FlushStrategyError::InvalidParameter {
+    let param = param
+        .strip_prefix(',')
+        .ok_or_else(|| FlushStrategyError::InvalidParameter {
             strategy: strategy.to_owned(),
             detail: "missing comma-separated millisecond parameter".to_owned(),
-        }
-    })?;
-    let ms: u64 = param.parse().map_err(|_| FlushStrategyError::InvalidParameter {
-        strategy: strategy.to_owned(),
-        detail: format!("{param:?} is not a valid positive integer"),
-    })?;
+        })?;
+    let ms: u64 = param
+        .parse()
+        .map_err(|_| FlushStrategyError::InvalidParameter {
+            strategy: strategy.to_owned(),
+            detail: format!("{param:?} is not a valid positive integer"),
+        })?;
     if ms == 0 {
         return Err(FlushStrategyError::InvalidParameter {
             strategy: strategy.to_owned(),
