@@ -28,17 +28,7 @@ impl LambdaTest {
         }
     }
 
-    /// Override the extension's log level (default: debug).
-    #[allow(dead_code)]
-    pub fn log_level(mut self, level: &str) -> Self {
-        self.env.retain(|(k, _)| k != "LAMBDA_OTEL_RELAY_LOG_LEVEL");
-        self.env
-            .push(("LAMBDA_OTEL_RELAY_LOG_LEVEL".into(), level.into()));
-        self
-    }
-
     /// Set an arbitrary environment variable on the container.
-    #[allow(dead_code)]
     pub fn env(mut self, key: &str, value: &str) -> Self {
         self.env.push((key.into(), value.into()));
         self
@@ -165,7 +155,6 @@ impl Harness {
 
     /// Wait for the extension to emit a specific log message.
     /// Used to detect errors or events without invoking the Lambda function.
-    #[allow(dead_code)]
     pub async fn wait_for_extension_log(&self, message: &str, level: Option<LogLevel>) -> Logs {
         self.wait_for_nth_occurrence(message, 1, EXTENSION_LOG_TARGET, level)
             .await
@@ -197,22 +186,6 @@ impl Harness {
 
         self.wait_for_nth_occurrence(message, 1, EXTENSION_LOG_TARGET, level)
             .await
-    }
-
-    /// Stop the container and return all captured logs.
-    ///
-    /// NOTE: This snapshots logs before the container is actually stopped (which
-    /// happens when `Harness` is dropped). Shutdown-specific messages (e.g.
-    /// "Received shutdown event") will not appear in the returned logs. To capture
-    /// those, this method will need to explicitly stop the container before the snapshot.
-    #[allow(dead_code)]
-    pub async fn shutdown(self) -> Logs {
-        let stdout_bytes = self.container.stdout_to_vec().await.unwrap_or_default();
-        let stderr_bytes = self.container.stderr_to_vec().await.unwrap_or_default();
-        Logs {
-            stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
-            stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
-        }
     }
 
     /// Retry a request future on transient connection errors (reset, refused).

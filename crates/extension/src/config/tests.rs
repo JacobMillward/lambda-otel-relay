@@ -315,10 +315,7 @@ fn certificate_reads_file_contents() {
 
     let config = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        (
-            "LAMBDA_OTEL_RELAY_CERTIFICATE",
-            f.path().to_str().unwrap(),
-        ),
+        ("LAMBDA_OTEL_RELAY_CERTIFICATE", f.path().to_str().unwrap()),
     ]))
     .unwrap();
     assert_eq!(config.tls_ca.as_deref(), Some(b"--- CA PEM ---".as_slice()));
@@ -383,12 +380,15 @@ fn client_cert_and_key_both_set() {
             "LAMBDA_OTEL_RELAY_CLIENT_CERT",
             cert.path().to_str().unwrap(),
         ),
-        (
-            "LAMBDA_OTEL_RELAY_CLIENT_KEY",
-            key.path().to_str().unwrap(),
-        ),
+        ("LAMBDA_OTEL_RELAY_CLIENT_KEY", key.path().to_str().unwrap()),
     ]))
     .unwrap();
-    assert_eq!(config.tls_client_cert.as_deref(), Some(b"cert-pem".as_slice()));
-    assert_eq!(config.tls_client_key.as_deref(), Some(b"key-pem".as_slice()));
+    assert_eq!(
+        config.tls_client_cert.as_deref(),
+        Some(b"cert-pem".as_slice())
+    );
+    assert_eq!(
+        config.tls_client_key.as_deref(),
+        Some(b"key-pem".as_slice())
+    );
 }

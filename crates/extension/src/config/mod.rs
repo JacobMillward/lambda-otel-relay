@@ -46,7 +46,6 @@ pub enum ConfigError {
 pub struct Config {
     pub endpoint: Url,
     pub listener_port: u16,
-    #[allow(dead_code)]
     pub telemetry_port: u16,
     pub export_timeout: Duration,
     pub compression: Compression,
