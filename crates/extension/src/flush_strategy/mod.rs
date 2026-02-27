@@ -1,5 +1,5 @@
-use std::fmt;
 use std::time::Duration;
+use std::{fmt, str::FromStr};
 
 use thiserror::Error;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
@@ -28,25 +28,27 @@ pub enum FlushStrategy {
     Continuously { interval: Duration },
 }
 
-impl FlushStrategy {
-    pub fn parse(raw: &str) -> Result<Self, FlushStrategyError> {
-        match raw {
+impl FromStr for FlushStrategy {
+    type Err = FlushStrategyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
             "" | "default" => Ok(FlushStrategy::Default),
             "end" => Ok(FlushStrategy::End),
-            _ if raw.starts_with("end,") => {
-                let ms = parse_ms_param("end", raw)?;
+            _ if s.starts_with("end,") => {
+                let ms = parse_ms_param("end", s)?;
                 Ok(FlushStrategy::EndPeriodically {
                     interval: Duration::from_millis(ms),
                 })
             }
-            _ if raw.starts_with("periodically,") || raw == "periodically" => {
-                let ms = parse_ms_param("periodically", raw)?;
+            _ if s.starts_with("periodically,") || s == "periodically" => {
+                let ms = parse_ms_param("periodically", s)?;
                 Ok(FlushStrategy::Periodically {
                     interval: Duration::from_millis(ms),
                 })
             }
-            _ if raw.starts_with("continuously,") || raw == "continuously" => {
-                let ms = parse_ms_param("continuously", raw)?;
+            _ if s.starts_with("continuously,") || s == "continuously" => {
+                let ms = parse_ms_param("continuously", s)?;
                 Ok(FlushStrategy::Continuously {
                     interval: Duration::from_millis(ms),
                 })

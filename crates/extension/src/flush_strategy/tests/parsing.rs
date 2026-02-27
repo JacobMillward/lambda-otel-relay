@@ -4,41 +4,41 @@ use super::super::*;
 
 #[test]
 fn parse_end() {
-    let strategy = FlushStrategy::parse("end").unwrap();
+    let strategy = "end".parse().unwrap();
     assert!(matches!(strategy, FlushStrategy::End));
 }
 
 #[test]
 fn parse_empty_defaults_to_default() {
-    let strategy = FlushStrategy::parse("").unwrap();
+    let strategy = "".parse().unwrap();
     assert!(matches!(strategy, FlushStrategy::Default));
 }
 
 #[test]
 fn parse_default() {
-    let strategy = FlushStrategy::parse("default").unwrap();
+    let strategy = "default".parse().unwrap();
     assert!(matches!(strategy, FlushStrategy::Default));
 }
 
 #[test]
 fn parse_unknown_strategy_errors() {
-    let err = FlushStrategy::parse("bogus").unwrap_err();
+    let err = "bogus".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::UnknownStrategy(_)));
 }
 
 #[test]
 fn parse_strategy_prefix_without_comma_is_unknown() {
     // "periodicallyX" should be UnknownStrategy, not InvalidParameter
-    let err = FlushStrategy::parse("periodicallyX").unwrap_err();
+    let err = "periodicallyX".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::UnknownStrategy(_)));
 
-    let err = FlushStrategy::parse("continuouslyFoo").unwrap_err();
+    let err = "continuouslyFoo".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::UnknownStrategy(_)));
 }
 
 #[test]
 fn parse_periodically() {
-    let strategy = FlushStrategy::parse("periodically,60000").unwrap();
+    let strategy = "periodically,60000".parse().unwrap();
     assert!(matches!(
         strategy,
         FlushStrategy::Periodically { interval } if interval == Duration::from_millis(60000)
@@ -47,25 +47,25 @@ fn parse_periodically() {
 
 #[test]
 fn parse_periodically_missing_param() {
-    let err = FlushStrategy::parse("periodically").unwrap_err();
+    let err = "periodically".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 }
 
 #[test]
 fn parse_periodically_zero() {
-    let err = FlushStrategy::parse("periodically,0").unwrap_err();
+    let err = "periodically,0".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 }
 
 #[test]
 fn parse_periodically_non_numeric() {
-    let err = FlushStrategy::parse("periodically,abc").unwrap_err();
+    let err = "periodically,abc".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 }
 
 #[test]
 fn parse_end_periodically() {
-    let strategy = FlushStrategy::parse("end,30000").unwrap();
+    let strategy = "end,30000".parse().unwrap();
     assert!(matches!(
         strategy,
         FlushStrategy::EndPeriodically { interval } if interval == Duration::from_millis(30000)
@@ -74,13 +74,13 @@ fn parse_end_periodically() {
 
 #[test]
 fn parse_end_periodically_zero() {
-    let err = FlushStrategy::parse("end,0").unwrap_err();
+    let err = "end,0".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 }
 
 #[test]
 fn parse_continuously() {
-    let strategy = FlushStrategy::parse("continuously,60000").unwrap();
+    let strategy = "continuously,60000".parse().unwrap();
     assert!(matches!(
         strategy,
         FlushStrategy::Continuously { interval } if interval == Duration::from_millis(60000)
@@ -89,13 +89,13 @@ fn parse_continuously() {
 
 #[test]
 fn parse_continuously_missing_param() {
-    let err = FlushStrategy::parse("continuously").unwrap_err();
+    let err = "continuously".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 }
 
 #[test]
 fn parse_continuously_zero() {
-    let err = FlushStrategy::parse("continuously,0").unwrap_err();
+    let err = "continuously,0".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 }
 
@@ -109,9 +109,9 @@ fn display_roundtrips_through_parse() {
         "continuously,5000",
     ];
     for &input in cases {
-        let strategy = FlushStrategy::parse(input).unwrap();
+        let strategy = input.parse::<FlushStrategy>().unwrap();
         let displayed = strategy.to_string();
-        let reparsed = FlushStrategy::parse(&displayed).unwrap();
+        let reparsed = &displayed.parse::<FlushStrategy>().unwrap();
         assert_eq!(
             displayed,
             reparsed.to_string(),
@@ -122,12 +122,12 @@ fn display_roundtrips_through_parse() {
 
 #[test]
 fn parse_negative_interval_errors() {
-    let err = FlushStrategy::parse("periodically,-5").unwrap_err();
+    let err = "periodically,-5".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 
-    let err = FlushStrategy::parse("end,-100").unwrap_err();
+    let err = "end,-100".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 
-    let err = FlushStrategy::parse("continuously,-1").unwrap_err();
+    let err = "continuously,-1".parse::<FlushStrategy>().unwrap_err();
     assert!(matches!(err, FlushStrategyError::InvalidParameter { .. }));
 }
