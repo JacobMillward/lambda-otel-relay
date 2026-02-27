@@ -100,12 +100,23 @@ impl ExtensionsApi for MockApi {
     }
 }
 
-pub fn dummy_config() -> crate::config::Config {
+/// Bind to port 0 and return the OS-assigned port.
+/// The listener is dropped, freeing the port for the caller to rebind.
+pub async fn free_port() -> u16 {
+    tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+pub async fn dummy_config() -> crate::config::Config {
     let _ = rustls::crypto::ring::default_provider().install_default();
     crate::config::Config {
         endpoint: url::Url::parse("http://localhost:4318").unwrap(),
-        listener_port: 0,
-        telemetry_port: 0,
+        listener_port: free_port().await,
+        telemetry_port: free_port().await,
         export_timeout: std::time::Duration::from_millis(100),
         compression: crate::config::Compression::None,
         export_headers: vec![],

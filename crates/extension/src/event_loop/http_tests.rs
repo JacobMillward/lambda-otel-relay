@@ -21,7 +21,7 @@ async fn next_event_future_not_dropped_by_channel_activity() {
         reason: "test".into(),
     })]);
 
-    let config = dummy_config();
+    let config = dummy_config().await;
     let mut event_loop = EventLoop::new(&mock, MockExporter, &config).await.unwrap();
 
     // Send 2 OTLP payloads via HTTP to trigger the channel branch of select!.
@@ -32,7 +32,7 @@ async fn next_event_future_not_dropped_by_channel_activity() {
         let resp = client
             .post(format!(
                 "http://127.0.0.1:{}/v1/traces",
-                event_loop.otlp_port
+                config.listener_port
             ))
             .body(b"\x0a\x00".to_vec())
             .send()
@@ -63,7 +63,7 @@ async fn threshold_triggers_background_flush_via_tick() {
         reason: "test".into(),
     })]);
 
-    let mut config = dummy_config();
+    let mut config = dummy_config().await;
     config.buffer_max_bytes = Some(1);
 
     let mut event_loop = EventLoop::new(&mock, MockExporter, &config).await.unwrap();
@@ -73,7 +73,7 @@ async fn threshold_triggers_background_flush_via_tick() {
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/v1/traces",
-            event_loop.otlp_port
+            config.listener_port
         ))
         .body(b"\x0a\x00".to_vec())
         .send()
@@ -96,7 +96,7 @@ async fn threshold_triggers_background_flush_via_tick() {
 async fn otlp_listener_crash_returns_exit_error() {
     let (mock, _state) = MockApi::new(vec![]);
 
-    let config = dummy_config();
+    let config = dummy_config().await;
 
     let mut event_loop = EventLoop::new(&mock, MockExporter, &config).await.unwrap();
 

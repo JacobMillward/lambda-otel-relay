@@ -29,8 +29,6 @@ pub struct EventLoop<'a, A: ExtensionsApi, E: Exporter> {
     otlp_task: JoinHandle<()>,
     telemetry_task: JoinHandle<()>,
     next_event_fut: ReusableBoxFuture<'a, Result<ExtensionsApiEvent, ApiError>>,
-    #[allow(dead_code)]
-    pub otlp_port: u16,
 }
 
 impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
@@ -48,7 +46,6 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
         let otlp_listener = TcpListener::bind(("127.0.0.1", config.listener_port))
             .await
             .map_err(|e| ApiError::InitFailed(format!("failed to bind OTLP listener: {e}")))?;
-        let otlp_port = otlp_listener.local_addr().unwrap().port();
 
         let telemetry_listener = TcpListener::bind(("0.0.0.0", config.telemetry_port))
             .await
@@ -72,7 +69,6 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
             otlp_task,
             telemetry_task,
             next_event_fut: ReusableBoxFuture::new(api.next_event()),
-            otlp_port,
         })
     }
 
