@@ -5,8 +5,8 @@
 
 mod support;
 
-use support::harness::LambdaTest;
 use support::LogLevel;
+use support::harness::LambdaTest;
 
 /// When config is invalid, the extension should register with the Extensions API,
 /// report the init error via `/extension/init/error`, and exit.

@@ -8,6 +8,9 @@ mod otlp_listener;
 mod proto;
 mod telemetry_listener;
 
+#[cfg(test)]
+mod testing;
+
 use event_loop::EventLoop;
 use extensions_api::{ExtensionApiClient, InitError};
 use tracing::error;
