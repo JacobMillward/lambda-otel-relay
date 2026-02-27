@@ -281,16 +281,18 @@ impl OutboundBuffer {
     }
 
     /// Synchronous flush: join in-flight background flush, then take + export + handle failures.
-    pub async fn flush<E: Exporter>(&self, exporter: &E) {
+    /// Returns `true` if data was exported, `false` if the buffer was empty.
+    pub async fn flush<E: Exporter>(&self, exporter: &E) -> bool {
         self.join_flush_task().await;
         let mut snapshot = self.take();
         if snapshot.is_empty() {
-            return;
+            return false;
         }
         if let Err(e) = exporter.export(&mut snapshot).await {
             error!(error = %e, "flush failed");
         }
         self.prepend_failed(snapshot);
+        true
     }
 }
 

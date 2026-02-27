@@ -106,8 +106,9 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
                         debug!(request_id, "Received invoke event");
-                        if self.flush_coordinator.should_flush_at_boundary() {
-                            self.buffer.flush(&*self.exporter).await;
+                        if self.flush_coordinator.should_flush_at_boundary()
+                            && self.buffer.flush(&*self.exporter).await
+                        {
                             self.flush_coordinator.record_flush();
                         }
                     }
@@ -180,8 +181,9 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                 if self.flush_coordinator.should_flush_on_timer() {
                     match self.flush_coordinator.timer_mode() {
                         TimerMode::Sync => {
-                            self.buffer.flush(&*self.exporter).await;
-                            self.flush_coordinator.record_flush();
+                            if self.buffer.flush(&*self.exporter).await {
+                                self.flush_coordinator.record_flush();
+                            }
                         }
                         TimerMode::Background => {
                             if self.buffer.spawn_flush(&self.exporter) {
