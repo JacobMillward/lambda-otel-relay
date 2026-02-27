@@ -209,24 +209,6 @@ fn shared_take_and_prepend_round_trip() {
     assert_eq!(restored.total_size_bytes(), 4); // "t1" + "m1"
 }
 
-#[test]
-fn shared_over_threshold() {
-    // No max_bytes → never over threshold
-    let buf = OutboundBuffer::new(None);
-    buf.push(Signal::Traces, Bytes::from("data"));
-    assert!(!buf.over_threshold());
-
-    // With max_bytes, under threshold
-    let buf = OutboundBuffer::new(Some(100));
-    buf.push(Signal::Traces, Bytes::from("data"));
-    assert!(!buf.over_threshold());
-
-    // With max_bytes, over threshold
-    let buf = OutboundBuffer::new(Some(2));
-    buf.push(Signal::Traces, Bytes::from("data"));
-    assert!(buf.over_threshold());
-}
-
 #[tokio::test]
 async fn spawn_flush_skips_if_in_flight() {
     let buffer = OutboundBuffer::new(None);

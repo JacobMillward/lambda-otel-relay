@@ -141,10 +141,9 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
             result = self.otlp_rx.recv() => {
                 match result {
                     Some((signal, payload)) => {
-                        self.buffer.push(signal, payload);
-                        if self.buffer.over_threshold()
-                            && self.buffer.spawn_flush(&self.exporter)
-                        {
+                        if self.buffer.push_and_maybe_flush(
+                            signal, payload, &self.exporter,
+                        ) {
                             self.flush_coordinator.record_flush();
                         }
                     }
