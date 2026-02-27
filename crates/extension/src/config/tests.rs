@@ -245,3 +245,26 @@ fn invalid_flush_strategy() {
     .unwrap_err();
     assert!(matches!(err, ConfigError::FlushStrategy(_)));
 }
+
+#[test]
+fn periodically_flush_strategy() {
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "periodically,60000"),
+    ]))
+    .unwrap();
+    assert!(matches!(
+        config.flush_strategy,
+        FlushStrategy::Periodically { interval } if interval == Duration::from_millis(60000)
+    ));
+}
+
+#[test]
+fn periodically_missing_param() {
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "periodically"),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::FlushStrategy(_)));
+}

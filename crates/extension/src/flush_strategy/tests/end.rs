@@ -2,38 +2,16 @@ use std::time::Duration;
 
 use tokio::time;
 
-use super::*;
-
-// -- Parsing tests --
-
-#[test]
-fn parse_end() {
-    let strategy = FlushStrategy::parse("end").unwrap();
-    assert!(matches!(strategy, FlushStrategy::End));
-}
-
-#[test]
-fn parse_empty_defaults_to_end() {
-    let strategy = FlushStrategy::parse("").unwrap();
-    assert!(matches!(strategy, FlushStrategy::End));
-}
-
-#[test]
-fn parse_unknown_strategy_errors() {
-    let err = FlushStrategy::parse("bogus").unwrap_err();
-    assert!(matches!(err, FlushStrategyError::UnknownStrategy(_)));
-}
-
-// -- Coordinator tests --
+use super::super::*;
 
 #[tokio::test(start_paused = true)]
-async fn end_always_flushes_at_boundary() {
+async fn always_flushes_at_boundary() {
     let coord = FlushCoordinator::new(FlushStrategy::End);
     assert!(coord.should_flush_at_boundary());
 }
 
 #[tokio::test(start_paused = true)]
-async fn end_does_not_flush_on_timer() {
+async fn does_not_flush_on_timer() {
     let coord = FlushCoordinator::new(FlushStrategy::End);
     assert!(!coord.should_flush_on_timer());
 }
