@@ -217,13 +217,13 @@ fn empty_headers_returns_empty_vec() {
 }
 
 #[test]
-fn default_flush_strategy_is_end() {
+fn default_flush_strategy_is_default() {
     let config = Config::parse(&vars(&[(
         "LAMBDA_OTEL_RELAY_ENDPOINT",
         "http://localhost:4318",
     )]))
     .unwrap();
-    assert!(matches!(config.flush_strategy, FlushStrategy::End));
+    assert!(matches!(config.flush_strategy, FlushStrategy::Default));
 }
 
 #[test]

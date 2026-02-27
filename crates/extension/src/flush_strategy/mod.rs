@@ -7,6 +7,9 @@ use tokio::time::{Instant, Interval, MissedTickBehavior};
 /// Debounce window: flushes within this duration of the last flush are skipped.
 const DEDUP_WINDOW: Duration = Duration::from_millis(100);
 
+/// Default adaptive threshold: boundary flush when gap since last flush >= this.
+const DEFAULT_ADAPTIVE_THRESHOLD: Duration = Duration::from_secs(60);
+
 #[derive(Debug, Error)]
 pub enum FlushStrategyError {
     #[error("unknown flush strategy: {0}")]
@@ -18,6 +21,7 @@ pub enum FlushStrategyError {
 
 #[derive(Debug, Clone)]
 pub enum FlushStrategy {
+    Default,
     End,
     EndPeriodically { interval: Duration },
     Periodically { interval: Duration },
@@ -27,7 +31,8 @@ pub enum FlushStrategy {
 impl FlushStrategy {
     pub fn parse(raw: &str) -> Result<Self, FlushStrategyError> {
         match raw {
-            "" | "end" => Ok(FlushStrategy::End),
+            "" | "default" => Ok(FlushStrategy::Default),
+            "end" => Ok(FlushStrategy::End),
             _ if raw.starts_with("end,") => {
                 let ms = parse_ms_param("end", raw)?;
                 Ok(FlushStrategy::EndPeriodically {
@@ -54,6 +59,7 @@ impl FlushStrategy {
 impl fmt::Display for FlushStrategy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            FlushStrategy::Default => write!(f, "default"),
             FlushStrategy::End => write!(f, "end"),
             FlushStrategy::EndPeriodically { interval } => {
                 write!(f, "end,{}", interval.as_millis())
@@ -90,6 +96,9 @@ impl FlushCoordinator {
     pub fn new(strategy: FlushStrategy) -> Self {
         let timer = match &strategy {
             FlushStrategy::End => FlushTimer::Inactive,
+            FlushStrategy::Default => FlushTimer::Active {
+                interval: build_interval(DEFAULT_ADAPTIVE_THRESHOLD),
+            },
             FlushStrategy::EndPeriodically { interval }
             | FlushStrategy::Periodically { interval }
             | FlushStrategy::Continuously { interval } => FlushTimer::Active {
@@ -119,6 +128,9 @@ impl FlushCoordinator {
             return false;
         }
         match &self.strategy {
+            FlushStrategy::Default => {
+                self.elapsed_since_flush() >= DEFAULT_ADAPTIVE_THRESHOLD
+            }
             FlushStrategy::End | FlushStrategy::EndPeriodically { .. } => true,
             FlushStrategy::Periodically { interval } => self.elapsed_since_flush() >= *interval,
             FlushStrategy::Continuously { .. } => false,
@@ -132,7 +144,8 @@ impl FlushCoordinator {
         }
         match &self.strategy {
             FlushStrategy::End => false,
-            FlushStrategy::EndPeriodically { .. }
+            FlushStrategy::Default
+            | FlushStrategy::EndPeriodically { .. }
             | FlushStrategy::Periodically { .. }
             | FlushStrategy::Continuously { .. } => true,
         }
@@ -144,7 +157,7 @@ impl FlushCoordinator {
             FlushStrategy::End
             | FlushStrategy::EndPeriodically { .. }
             | FlushStrategy::Periodically { .. } => TimerMode::Sync,
-            FlushStrategy::Continuously { .. } => TimerMode::Background,
+            FlushStrategy::Default | FlushStrategy::Continuously { .. } => TimerMode::Background,
         }
     }
 

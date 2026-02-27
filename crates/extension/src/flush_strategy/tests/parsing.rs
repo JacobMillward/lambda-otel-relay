@@ -9,9 +9,15 @@ fn parse_end() {
 }
 
 #[test]
-fn parse_empty_defaults_to_end() {
+fn parse_empty_defaults_to_default() {
     let strategy = FlushStrategy::parse("").unwrap();
-    assert!(matches!(strategy, FlushStrategy::End));
+    assert!(matches!(strategy, FlushStrategy::Default));
+}
+
+#[test]
+fn parse_default() {
+    let strategy = FlushStrategy::parse("default").unwrap();
+    assert!(matches!(strategy, FlushStrategy::Default));
 }
 
 #[test]
