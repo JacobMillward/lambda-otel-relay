@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use tokio::sync::mpsc;
 
 use crate::buffers::{OutboundBuffer, Signal};
 use crate::testing::{FailingExporter, MockExporter, PartialFailExporter};
 
 #[tokio::test]
 async fn failed_flush_prepends_data_back() {
-    let buffer = OutboundBuffer::new(Some(1_000_000));
+    let (tx, _) = mpsc::channel(1);
+    let buffer = OutboundBuffer::new(Some(1_000_000), tx);
     buffer.push(Signal::Traces, Bytes::from("trace_data"));
     buffer.push(Signal::Metrics, Bytes::from("metric_data"));
 
@@ -26,7 +28,8 @@ async fn failed_flush_prepends_data_back() {
 
 #[tokio::test]
 async fn sync_flush_joins_background_task() {
-    let buffer = OutboundBuffer::new(None);
+    let (tx, _) = mpsc::channel(1);
+    let buffer = OutboundBuffer::new(None, tx);
     buffer.push(Signal::Traces, Bytes::from("data"));
 
     let exporter = Arc::new(MockExporter);
@@ -45,7 +48,8 @@ async fn sync_flush_joins_background_task() {
 
 #[tokio::test]
 async fn partial_failure_preserves_only_failed_signals() {
-    let buffer = OutboundBuffer::new(None);
+    let (tx, _) = mpsc::channel(1);
+    let buffer = OutboundBuffer::new(None, tx);
     buffer.push(Signal::Traces, Bytes::from("trace_data"));
     buffer.push(Signal::Metrics, Bytes::from("metric_data"));
     buffer.push(Signal::Logs, Bytes::from("log_data"));

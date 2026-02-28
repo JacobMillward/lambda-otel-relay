@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use bytes::Bytes;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
@@ -169,19 +170,23 @@ struct BufferState {
 ///
 /// Uses `std::sync::Mutex` (not tokio) because the lock is never held across
 /// `.await` — all operations are sub-microsecond field swaps.
+///
+/// Sends notifications on each complete flush.
 #[derive(Clone)]
 pub struct OutboundBuffer {
     state: Arc<Mutex<BufferState>>,
     max_bytes: Option<usize>,
+    flush_notify: mpsc::Sender<()>,
 }
 
 impl OutboundBuffer {
-    pub fn new(max_bytes: Option<usize>) -> Self {
+    pub fn new(max_bytes: Option<usize>, flush_notify: mpsc::Sender<()>) -> Self {
         Self {
             state: Arc::new(Mutex::new(BufferState {
                 data: BufferData::new(),
                 flush_task: None,
             })),
+            flush_notify,
             max_bytes,
         }
     }
@@ -261,13 +266,17 @@ impl OutboundBuffer {
         let exporter = Arc::clone(exporter);
         let buffer = self.clone();
 
-        state.flush_task = Some(tokio::spawn(async move {
-            if let Err(e) = exporter.export(&mut snapshot).await {
-                error!(error = %e, "background flush failed");
-            }
-            // Prepend any remaining data (failed signals). No-op if export cleared everything.
-            buffer.prepend_failed(snapshot);
-        }));
+        {
+            let flush_notify = self.flush_notify.clone();
+            state.flush_task = Some(tokio::spawn(async move {
+                if let Err(e) = exporter.export(&mut snapshot).await {
+                    error!(error = %e, "background flush failed");
+                }
+                // Prepend any remaining data (failed signals). No-op if export cleared everything.
+                buffer.prepend_failed(snapshot);
+                notify_flush_complete(&flush_notify);
+            }));
+        }
 
         true
     }
@@ -294,8 +303,16 @@ impl OutboundBuffer {
             error!(error = %e, "flush failed");
         }
         self.prepend_failed(snapshot);
+        notify_flush_complete(&self.flush_notify);
+
         true
     }
+}
+
+fn notify_flush_complete(tx: &mpsc::Sender<()>) {
+    if let Err(e) = tx.try_send(()) {
+        error!(error = %e, "notify flush complete failed");
+    };
 }
 
 #[cfg(test)]
