@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Write;
 use std::time::Duration;
 
 use super::*;
@@ -293,4 +294,101 @@ fn continuously_flush_strategy() {
         config.flush_strategy,
         FlushStrategy::Continuously { interval } if interval == Duration::from_millis(60000)
     ));
+}
+
+#[test]
+fn certificate_absent_returns_none() {
+    let config = Config::parse(&vars(&[(
+        "LAMBDA_OTEL_RELAY_ENDPOINT",
+        "http://localhost:4318",
+    )]))
+    .unwrap();
+    assert!(config.tls_ca.is_none());
+    assert!(config.tls_client_cert.is_none());
+    assert!(config.tls_client_key.is_none());
+}
+
+#[test]
+fn certificate_reads_file_contents() {
+    let mut f = tempfile::NamedTempFile::new().unwrap();
+    f.write_all(b"--- CA PEM ---").unwrap();
+
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_CERTIFICATE", f.path().to_str().unwrap()),
+    ]))
+    .unwrap();
+    assert_eq!(config.tls_ca.as_deref(), Some(b"--- CA PEM ---".as_slice()));
+}
+
+#[test]
+fn certificate_missing_file_errors() {
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_CERTIFICATE", "/no/such/file.pem"),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::CertificateFile { .. }));
+}
+
+#[test]
+fn certificate_empty_value_treated_as_absent() {
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_CERTIFICATE", ""),
+    ]))
+    .unwrap();
+    assert!(config.tls_ca.is_none());
+}
+
+#[test]
+fn client_cert_without_key_errors() {
+    let mut f = tempfile::NamedTempFile::new().unwrap();
+    f.write_all(b"cert").unwrap();
+
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_CLIENT_CERT", f.path().to_str().unwrap()),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::ClientIdentityIncomplete));
+}
+
+#[test]
+fn client_key_without_cert_errors() {
+    let mut f = tempfile::NamedTempFile::new().unwrap();
+    f.write_all(b"key").unwrap();
+
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_CLIENT_KEY", f.path().to_str().unwrap()),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::ClientIdentityIncomplete));
+}
+
+#[test]
+fn client_cert_and_key_both_set() {
+    let mut cert = tempfile::NamedTempFile::new().unwrap();
+    cert.write_all(b"cert-pem").unwrap();
+    let mut key = tempfile::NamedTempFile::new().unwrap();
+    key.write_all(b"key-pem").unwrap();
+
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        (
+            "LAMBDA_OTEL_RELAY_CLIENT_CERT",
+            cert.path().to_str().unwrap(),
+        ),
+        ("LAMBDA_OTEL_RELAY_CLIENT_KEY", key.path().to_str().unwrap()),
+    ]))
+    .unwrap();
+    assert_eq!(
+        config.tls_client_cert.as_deref(),
+        Some(b"cert-pem".as_slice())
+    );
+    assert_eq!(
+        config.tls_client_key.as_deref(),
+        Some(b"key-pem".as_slice())
+    );
 }

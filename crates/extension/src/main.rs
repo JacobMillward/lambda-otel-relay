@@ -68,7 +68,15 @@ async fn main() {
         }
     };
 
-    let exporter = exporter::OtlpExporter::new(&config);
+    let exporter = match exporter::OtlpExporter::new(&config) {
+        Ok(e) => e,
+        Err(e) => {
+            let err = InitError::from(e);
+            error!(%err, "TLS configuration error");
+            ext.report_init_error(&err).await;
+            std::process::exit(1);
+        }
+    };
     let mut event_loop = match EventLoop::new(&ext, exporter, &config).await {
         Ok(el) => el,
         Err(e) => {

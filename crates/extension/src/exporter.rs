@@ -24,6 +24,18 @@ pub enum ExportError {
     Compression(#[from] std::io::Error),
 }
 
+#[derive(Debug, Error)]
+pub enum ExporterError {
+    #[error("LAMBDA_OTEL_RELAY_CERTIFICATE: invalid PEM: {0}")]
+    InvalidCaCertificate(reqwest::Error),
+
+    #[error("LAMBDA_OTEL_RELAY_CLIENT_CERT/CLIENT_KEY: invalid PEM: {0}")]
+    InvalidClientIdentity(reqwest::Error),
+
+    #[error("failed to build HTTP client: {0}")]
+    ClientBuild(reqwest::Error),
+}
+
 /// Abstraction over exporting telemetry data to a collector.
 ///
 /// The returned future must be `Send` because `OutboundBuffer::spawn_flush`
@@ -41,18 +53,34 @@ pub struct OtlpExporter {
 }
 
 impl OtlpExporter {
-    pub fn new(config: &Config) -> Self {
-        let client = Client::builder()
-            .timeout(config.export_timeout)
-            .build()
-            .expect("failed to build HTTP client");
+    pub fn new(config: &Config) -> Result<Self, ExporterError> {
+        let mut builder = Client::builder().timeout(config.export_timeout);
 
-        Self {
+        if let Some(ca_pem) = &config.tls_ca {
+            let certs = reqwest::Certificate::from_pem_bundle(ca_pem)
+                .map_err(ExporterError::InvalidCaCertificate)?;
+            for cert in certs {
+                builder = builder.add_root_certificate(cert);
+            }
+        }
+
+        if let Some(cert_pem) = &config.tls_client_cert {
+            let key_pem = config.tls_client_key.as_ref().unwrap();
+            let mut identity_pem = cert_pem.clone();
+            identity_pem.extend_from_slice(key_pem);
+            let identity = reqwest::Identity::from_pem(&identity_pem)
+                .map_err(ExporterError::InvalidClientIdentity)?;
+            builder = builder.identity(identity);
+        }
+
+        let client = builder.build().map_err(ExporterError::ClientBuild)?;
+
+        Ok(Self {
             client,
             endpoint: config.endpoint.clone(),
             compression: config.compression,
             headers: config.export_headers.clone(),
-        }
+        })
     }
 
     async fn export_traces(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
