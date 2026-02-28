@@ -5,6 +5,8 @@ use std::time::Duration;
 use thiserror::Error;
 use url::Url;
 
+use crate::flush_strategy::{FlushStrategy, FlushStrategyError};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Compression {
     Gzip,
@@ -24,6 +26,9 @@ pub enum ConfigError {
 
     #[error("LAMBDA_OTEL_RELAY_COMPRESSION has invalid value: {0} (expected \"gzip\" or \"none\")")]
     InvalidCompression(String),
+
+    #[error("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY: {0}")]
+    FlushStrategy(#[from] FlushStrategyError),
 }
 
 #[derive(Debug)]
@@ -36,6 +41,7 @@ pub struct Config {
     pub compression: Compression,
     pub export_headers: Vec<(String, String)>,
     pub buffer_max_bytes: Option<usize>,
+    pub flush_strategy: FlushStrategy,
 }
 
 impl Config {
@@ -54,6 +60,11 @@ impl Config {
         let compression = parse_compression(vars)?;
         let export_headers = parse_headers(vars);
         let buffer_max_bytes = parse_buffer_max_bytes(vars, "LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES")?;
+        let flush_strategy = vars
+            .get("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY")
+            .map(|s| s.as_str())
+            .unwrap_or("")
+            .parse()?;
 
         Ok(Self {
             endpoint,
@@ -63,6 +74,7 @@ impl Config {
             compression,
             export_headers,
             buffer_max_bytes,
+            flush_strategy,
         })
     }
 }

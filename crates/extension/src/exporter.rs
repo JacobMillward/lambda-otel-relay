@@ -56,27 +56,39 @@ impl OtlpExporter {
     }
 
     async fn export_traces(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
-        if queue.is_empty() {
-            return Ok(());
+        match queue.len() {
+            0 => Ok(()),
+            1 => self.post_bytes("v1/traces", &queue[0]).await,
+            _ => self.post("v1/traces", &merge::merge_traces(queue)).await,
         }
-        self.post("v1/traces", &merge::merge_traces(queue)).await
     }
 
     async fn export_metrics(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
-        if queue.is_empty() {
-            return Ok(());
+        match queue.len() {
+            0 => Ok(()),
+            1 => self.post_bytes("v1/metrics", &queue[0]).await,
+            _ => self.post("v1/metrics", &merge::merge_metrics(queue)).await,
         }
-        self.post("v1/metrics", &merge::merge_metrics(queue)).await
     }
 
     async fn export_logs(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
-        if queue.is_empty() {
-            return Ok(());
+        match queue.len() {
+            0 => Ok(()),
+            1 => self.post_bytes("v1/logs", &queue[0]).await,
+            _ => self.post("v1/logs", &merge::merge_logs(queue)).await,
         }
-        self.post("v1/logs", &merge::merge_logs(queue)).await
+    }
+
+    /// Send pre-encoded protobuf bytes directly, skipping decode/merge/re-encode.
+    async fn post_bytes(&self, path: &str, protobuf: &[u8]) -> Result<(), ExportError> {
+        self.post_body(path, protobuf).await
     }
 
     async fn post(&self, path: &str, msg: &impl Message) -> Result<(), ExportError> {
+        self.post_body(path, &msg.encode_to_vec()).await
+    }
+
+    async fn post_body(&self, path: &str, protobuf: &[u8]) -> Result<(), ExportError> {
         let url = self.endpoint.join(path).expect("invalid export path");
 
         let mut req = self
@@ -87,9 +99,9 @@ impl OtlpExporter {
         let body = match self.compression {
             Compression::Gzip => {
                 req = req.header("content-encoding", "gzip");
-                encode_gzip(msg)?
+                compress_gzip(protobuf)?
             }
-            Compression::None => msg.encode_to_vec(),
+            Compression::None => protobuf.to_vec(),
         };
 
         for (k, v) in &self.headers {
@@ -134,12 +146,10 @@ impl Exporter for OtlpExporter {
     }
 }
 
-/// Encode a protobuf message and gzip-compress the result.
-/// Pre-sizes both buffers using `encoded_len()` to avoid reallocation.
-fn encode_gzip(msg: &impl Message) -> Result<Vec<u8>, std::io::Error> {
-    let raw = msg.encode_to_vec();
-    let mut encoder = GzEncoder::new(Vec::with_capacity(raw.len()), flate2::Compression::fast());
-    encoder.write_all(&raw)?;
+/// Gzip-compress pre-encoded protobuf bytes.
+fn compress_gzip(data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+    let mut encoder = GzEncoder::new(Vec::with_capacity(data.len()), flate2::Compression::fast());
+    encoder.write_all(data)?;
     encoder.finish()
 }
 
@@ -152,7 +162,7 @@ mod tests {
     use std::io::Read;
 
     #[test]
-    fn encode_gzip_produces_valid_protobuf() {
+    fn compress_gzip_produces_valid_protobuf() {
         let msg = ExportTraceServiceRequest {
             resource_spans: vec![ResourceSpans {
                 resource: None,
@@ -161,11 +171,12 @@ mod tests {
             }],
         };
 
-        let compressed = encode_gzip(&msg).unwrap();
+        let encoded = msg.encode_to_vec();
+        let compressed = compress_gzip(&encoded).unwrap();
 
         let mut decoder = GzDecoder::new(&compressed[..]);
         let mut decompressed = Vec::new();
         decoder.read_to_end(&mut decompressed).unwrap();
-        assert_eq!(decompressed, msg.encode_to_vec());
+        assert_eq!(decompressed, encoded);
     }
 }

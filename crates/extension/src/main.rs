@@ -3,6 +3,7 @@ mod config;
 mod event_loop;
 mod exporter;
 mod extensions_api;
+mod flush_strategy;
 mod merge;
 mod otlp_listener;
 mod proto;

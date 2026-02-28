@@ -98,29 +98,31 @@ impl BufferData {
     pub fn evict_to(&mut self, max_bytes: usize) {
         let mut dropped_bytes = [0usize; 3]; // traces, metrics, logs
         let mut dropped_count = [0usize; 3];
+        let mut total = self.total_size_bytes();
 
-        while self.total_size_bytes() > max_bytes {
+        while total > max_bytes {
             let mut any_evicted = false;
 
-            if self.total_size_bytes() > max_bytes {
-                let freed = self.traces.evict_oldest();
-                if freed > 0 {
-                    dropped_bytes[0] += freed;
-                    dropped_count[0] += 1;
-                    any_evicted = true;
-                }
+            let freed = self.traces.evict_oldest();
+            if freed > 0 {
+                total -= freed;
+                dropped_bytes[0] += freed;
+                dropped_count[0] += 1;
+                any_evicted = true;
             }
-            if self.total_size_bytes() > max_bytes {
+            if total > max_bytes {
                 let freed = self.metrics.evict_oldest();
                 if freed > 0 {
+                    total -= freed;
                     dropped_bytes[1] += freed;
                     dropped_count[1] += 1;
                     any_evicted = true;
                 }
             }
-            if self.total_size_bytes() > max_bytes {
+            if total > max_bytes {
                 let freed = self.logs.evict_oldest();
                 if freed > 0 {
+                    total -= freed;
                     dropped_bytes[2] += freed;
                     dropped_count[2] += 1;
                     any_evicted = true;
@@ -188,14 +190,6 @@ impl OutboundBuffer {
         self.state.lock().unwrap().data.push(signal, payload);
     }
 
-    /// Returns true if `max_bytes` is set and the buffer exceeds it.
-    pub fn over_threshold(&self) -> bool {
-        match self.max_bytes {
-            Some(max) => self.state.lock().unwrap().data.total_size_bytes() > max,
-            None => false,
-        }
-    }
-
     /// Take all data out of the buffer, leaving it empty.
     pub fn take(&self) -> BufferData {
         std::mem::take(&mut self.state.lock().unwrap().data)
@@ -214,19 +208,44 @@ impl OutboundBuffer {
         }
     }
 
-    /// Spawn a background flush. No-op if a flush is already in-flight or buffer is empty.
-    pub fn spawn_flush<E: Exporter>(&self, exporter: &Arc<E>) {
+    /// Push a payload and, if over the byte threshold, try to spawn a background
+    /// flush — all under a single lock acquisition.
+    ///
+    /// Returns `true` if a flush was spawned.
+    pub fn push_and_maybe_flush<E: Exporter>(
+        &self,
+        signal: Signal,
+        payload: Bytes,
+        exporter: &Arc<E>,
+    ) -> bool {
         let mut guard = self.state.lock().unwrap();
+        guard.data.push(signal, payload);
+        match self.max_bytes {
+            Some(max) if guard.data.total_size_bytes() > max => {
+                self.try_spawn_flush(&mut guard, exporter)
+            }
+            _ => false,
+        }
+    }
 
+    /// Spawn a background flush. Returns `true` if a flush was spawned, `false` if
+    /// skipped (already in-flight or buffer empty).
+    pub fn spawn_flush<E: Exporter>(&self, exporter: &Arc<E>) -> bool {
+        let mut guard = self.state.lock().unwrap();
+        self.try_spawn_flush(&mut guard, exporter)
+    }
+
+    /// Inner spawn logic, called with the lock already held.
+    fn try_spawn_flush<E: Exporter>(&self, state: &mut BufferState, exporter: &Arc<E>) -> bool {
         // Skip if a flush is already in-flight
-        if let Some(handle) = guard.flush_task.as_ref()
+        if let Some(handle) = state.flush_task.as_ref()
             && !handle.is_finished()
         {
-            return;
+            return false;
         }
 
         // Join the finished task to surface panics before overwriting.
-        if let Some(mut handle) = guard.flush_task.take() {
+        if let Some(mut handle) = state.flush_task.take() {
             let waker = Waker::noop();
             let mut cx = Context::from_waker(waker);
             if let Poll::Ready(Err(e)) = Pin::new(&mut handle).poll(&mut cx) {
@@ -234,21 +253,23 @@ impl OutboundBuffer {
             }
         }
 
-        let mut snapshot = std::mem::take(&mut guard.data);
+        let mut snapshot = std::mem::take(&mut state.data);
         if snapshot.is_empty() {
-            return;
+            return false;
         }
 
         let exporter = Arc::clone(exporter);
         let buffer = self.clone();
 
-        guard.flush_task = Some(tokio::spawn(async move {
+        state.flush_task = Some(tokio::spawn(async move {
             if let Err(e) = exporter.export(&mut snapshot).await {
                 error!(error = %e, "background flush failed");
             }
             // Prepend any remaining data (failed signals). No-op if export cleared everything.
             buffer.prepend_failed(snapshot);
         }));
+
+        true
     }
 
     /// Join any in-flight background flush to completion.
@@ -262,16 +283,18 @@ impl OutboundBuffer {
     }
 
     /// Synchronous flush: join in-flight background flush, then take + export + handle failures.
-    pub async fn flush<E: Exporter>(&self, exporter: &E) {
+    /// Returns `true` if data was exported, `false` if the buffer was empty.
+    pub async fn flush<E: Exporter>(&self, exporter: &E) -> bool {
         self.join_flush_task().await;
         let mut snapshot = self.take();
         if snapshot.is_empty() {
-            return;
+            return false;
         }
         if let Err(e) = exporter.export(&mut snapshot).await {
             error!(error = %e, "flush failed");
         }
         self.prepend_failed(snapshot);
+        true
     }
 }
 

@@ -40,7 +40,7 @@ where
         .await
         .map_err(|_| (StatusCode::BAD_REQUEST, "failed to read body".to_owned()))?;
 
-    String::from_utf8(body.to_bytes().to_vec()).map_err(|_| {
+    String::from_utf8(body.to_bytes().into()).map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
             "body is not valid UTF-8".to_owned(),

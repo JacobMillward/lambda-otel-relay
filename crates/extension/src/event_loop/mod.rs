@@ -12,6 +12,7 @@ use crate::buffers::{OutboundBuffer, Signal};
 use crate::config::Config;
 use crate::exporter::Exporter;
 use crate::extensions_api::{self, ApiError, ExitError, ExtensionsApi, ExtensionsApiEvent};
+use crate::flush_strategy::{FlushCoordinator, TimerMode};
 use crate::telemetry_listener::TelemetryEvent;
 use crate::{otlp_listener, telemetry_listener};
 
@@ -23,6 +24,7 @@ pub struct EventLoop<'a, A: ExtensionsApi, E: Exporter> {
     api: &'a A,
     exporter: Arc<E>,
     buffer: OutboundBuffer,
+    flush_coordinator: FlushCoordinator,
     otlp_rx: mpsc::Receiver<(Signal, Bytes)>,
     telemetry_rx: mpsc::Receiver<TelemetryEvent>,
     cancel: CancellationToken,
@@ -63,6 +65,7 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
             api,
             exporter: Arc::new(exporter),
             buffer: OutboundBuffer::new(config.buffer_max_bytes),
+            flush_coordinator: FlushCoordinator::new(config.flush_strategy.clone()),
             otlp_rx,
             telemetry_rx,
             cancel,
@@ -103,7 +106,11 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
                         debug!(request_id, "Received invoke event");
-                        self.buffer.flush(&*self.exporter).await;
+                        if self.flush_coordinator.should_flush_at_boundary()
+                            && self.buffer.flush(&*self.exporter).await
+                        {
+                            self.flush_coordinator.record_flush();
+                        }
                     }
                     Ok(ExtensionsApiEvent::Shutdown { reason }) => {
                         debug!(reason, "Received shutdown event");
@@ -135,9 +142,10 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
             result = self.otlp_rx.recv() => {
                 match result {
                     Some((signal, payload)) => {
-                        self.buffer.push(signal, payload);
-                        if self.buffer.over_threshold() {
-                            self.buffer.spawn_flush(&self.exporter);
+                        if self.buffer.push_and_maybe_flush(
+                            signal, payload, &self.exporter,
+                        ) {
+                            self.flush_coordinator.record_flush();
                         }
                     }
                     None if !self.cancel.is_cancelled() => {
@@ -167,6 +175,22 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                         )));
                     }
                     None => {}
+                }
+            }
+            _ = self.flush_coordinator.next_tick() => {
+                if self.flush_coordinator.should_flush_on_timer() {
+                    match self.flush_coordinator.timer_mode() {
+                        TimerMode::Sync => {
+                            if self.buffer.flush(&*self.exporter).await {
+                                self.flush_coordinator.record_flush();
+                            }
+                        }
+                        TimerMode::Background => {
+                            if self.buffer.spawn_flush(&self.exporter) {
+                                self.flush_coordinator.record_flush();
+                            }
+                        }
+                    }
                 }
             }
         }

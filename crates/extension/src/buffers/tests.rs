@@ -209,35 +209,17 @@ fn shared_take_and_prepend_round_trip() {
     assert_eq!(restored.total_size_bytes(), 4); // "t1" + "m1"
 }
 
-#[test]
-fn shared_over_threshold() {
-    // No max_bytes → never over threshold
-    let buf = OutboundBuffer::new(None);
-    buf.push(Signal::Traces, Bytes::from("data"));
-    assert!(!buf.over_threshold());
-
-    // With max_bytes, under threshold
-    let buf = OutboundBuffer::new(Some(100));
-    buf.push(Signal::Traces, Bytes::from("data"));
-    assert!(!buf.over_threshold());
-
-    // With max_bytes, over threshold
-    let buf = OutboundBuffer::new(Some(2));
-    buf.push(Signal::Traces, Bytes::from("data"));
-    assert!(buf.over_threshold());
-}
-
 #[tokio::test]
 async fn spawn_flush_skips_if_in_flight() {
     let buffer = OutboundBuffer::new(None);
     buffer.push(Signal::Traces, Bytes::from("batch1"));
 
     let exporter = Arc::new(SlowExporter);
-    buffer.spawn_flush(&exporter);
+    assert!(buffer.spawn_flush(&exporter));
 
     // Push more data and try to spawn again while first is in-flight
     buffer.push(Signal::Traces, Bytes::from("batch2"));
-    buffer.spawn_flush(&exporter); // Should be no-op
+    assert!(!buffer.spawn_flush(&exporter)); // Should be no-op
 
     buffer.join_flush_task().await;
 
@@ -245,4 +227,19 @@ async fn spawn_flush_skips_if_in_flight() {
     let data = buffer.take();
     assert_eq!(data.traces.queue.len(), 1);
     assert_eq!(data.traces.queue[0], Bytes::from("batch2"));
+}
+
+#[tokio::test]
+async fn spawn_flush_returns_true_when_spawned() {
+    let buffer = OutboundBuffer::new(None);
+    buffer.push(Signal::Traces, Bytes::from("data"));
+    let exporter = Arc::new(crate::testing::MockExporter);
+    assert!(buffer.spawn_flush(&exporter));
+}
+
+#[tokio::test]
+async fn spawn_flush_returns_false_when_empty() {
+    let buffer = OutboundBuffer::new(None);
+    let exporter = Arc::new(crate::testing::MockExporter);
+    assert!(!buffer.spawn_flush(&exporter));
 }

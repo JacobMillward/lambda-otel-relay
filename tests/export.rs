@@ -61,7 +61,10 @@ fn simple_logs_payload() -> Vec<u8> {
 
 #[tokio::test]
 async fn export_delivers_traces() {
-    let harness = LambdaTest::new().start().await;
+    let harness = LambdaTest::new()
+        .env("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "end")
+        .start()
+        .await;
 
     // Invoke 1: send trace data
     let result = harness
@@ -80,7 +83,10 @@ async fn export_delivers_traces() {
 
 #[tokio::test]
 async fn export_delivers_all_signals() {
-    let harness = LambdaTest::new().start().await;
+    let harness = LambdaTest::new()
+        .env("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "end")
+        .start()
+        .await;
 
     // Invoke 1: send all three signal types
     let result = harness
@@ -109,7 +115,10 @@ async fn export_delivers_all_signals() {
 
 #[tokio::test]
 async fn export_gzip_compression() {
-    let harness = LambdaTest::new().start().await;
+    let harness = LambdaTest::new()
+        .env("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "end")
+        .start()
+        .await;
 
     let payload = simple_trace_payload();
     let result = harness
@@ -140,6 +149,7 @@ async fn export_gzip_compression() {
 #[tokio::test]
 async fn export_uncompressed() {
     let harness = LambdaTest::new()
+        .env("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "end")
         .env("LAMBDA_OTEL_RELAY_COMPRESSION", "none")
         .start()
         .await;
@@ -169,6 +179,7 @@ async fn export_uncompressed() {
 #[tokio::test]
 async fn export_custom_headers() {
     let harness = LambdaTest::new()
+        .env("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "end")
         .env(
             "LAMBDA_OTEL_RELAY_EXPORT_HEADERS",
             "x-api-key=abc123,x-tenant=foo",
@@ -198,7 +209,10 @@ async fn export_custom_headers() {
 
 #[tokio::test]
 async fn export_content_type() {
-    let harness = LambdaTest::new().start().await;
+    let harness = LambdaTest::new()
+        .env("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "end")
+        .start()
+        .await;
 
     let result = harness
         .invoke(Scenario::new().post_otlp("/v1/traces", &simple_trace_payload()))
@@ -218,7 +232,10 @@ async fn export_content_type() {
 
 #[tokio::test]
 async fn export_empty_buffer_no_export() {
-    let harness = LambdaTest::new().start().await;
+    let harness = LambdaTest::new()
+        .env("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY", "end")
+        .start()
+        .await;
 
     // Invoke 1: no OTLP data posted
     harness.invoke(Scenario::new()).await;

@@ -25,6 +25,9 @@ tracing-microjson = "0.3"
 prost = "0.14"
 flate2 = "1"
 
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+
 [build-dependencies]
 prost-build = "0.14"
 protox = "0.9"
