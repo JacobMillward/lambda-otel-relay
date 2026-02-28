@@ -157,10 +157,15 @@ async fn continuously_timer_flushes_buffer_via_tick() {
     // Wait for the background flush task to complete
     event_loop.buffer.join_flush_task().await;
 
+    // This tick should handle the "flush complete" notification
+    // and the subsequent timer event.
+    let _ = event_loop.tick().await;
+    let _ = event_loop.tick().await;
+
     // Buffer should be empty — timer-driven background flush exported everything
     assert!(event_loop.buffer.take().is_empty());
 
     // Clean shutdown
     state.release.notify_one();
-    let _ = event_loop.tick().await;
+    let _ = event_loop.run().await;
 }

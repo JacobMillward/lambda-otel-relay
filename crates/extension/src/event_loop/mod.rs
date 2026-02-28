@@ -25,6 +25,7 @@ pub struct EventLoop<'a, A: ExtensionsApi, E: Exporter> {
     exporter: Arc<E>,
     buffer: OutboundBuffer,
     flush_coordinator: FlushCoordinator,
+    flush_rx: mpsc::Receiver<()>,
     otlp_rx: mpsc::Receiver<(Signal, Bytes)>,
     telemetry_rx: mpsc::Receiver<TelemetryEvent>,
     cancel: CancellationToken,
@@ -44,6 +45,7 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
         let cancel = CancellationToken::new();
         let (otlp_tx, otlp_rx) = mpsc::channel::<(Signal, Bytes)>(128);
         let (telemetry_tx, telemetry_rx) = mpsc::channel::<TelemetryEvent>(64);
+        let (flush_tx, flush_rx) = mpsc::channel::<()>(1);
 
         let otlp_listener = TcpListener::bind(("127.0.0.1", config.listener_port))
             .await
@@ -64,8 +66,9 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
         Ok(Self {
             api,
             exporter: Arc::new(exporter),
-            buffer: OutboundBuffer::new(config.buffer_max_bytes),
+            buffer: OutboundBuffer::new(config.buffer_max_bytes, flush_tx),
             flush_coordinator: FlushCoordinator::new(config.flush_strategy.clone()),
+            flush_rx,
             otlp_rx,
             telemetry_rx,
             cancel,
@@ -106,10 +109,8 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
                         debug!(request_id, "Received invoke event");
-                        if self.flush_coordinator.should_flush_at_boundary()
-                            && self.buffer.flush(&*self.exporter).await
-                        {
-                            self.flush_coordinator.record_flush();
+                        if self.flush_coordinator.should_flush_at_boundary() {
+                            self.buffer.flush(&*self.exporter).await;
                         }
                     }
                     Ok(ExtensionsApiEvent::Shutdown { reason }) => {
@@ -177,18 +178,17 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                     None => {}
                 }
             }
+            _ = self.flush_rx.recv() => {
+                self.flush_coordinator.record_flush();
+            }
             _ = self.flush_coordinator.next_tick() => {
                 if self.flush_coordinator.should_flush_on_timer() {
                     match self.flush_coordinator.timer_mode() {
                         TimerMode::Sync => {
-                            if self.buffer.flush(&*self.exporter).await {
-                                self.flush_coordinator.record_flush();
-                            }
+                            self.buffer.flush(&*self.exporter).await;
                         }
                         TimerMode::Background => {
-                            if self.buffer.spawn_flush(&self.exporter) {
-                                self.flush_coordinator.record_flush();
-                            }
+                            self.buffer.spawn_flush(&self.exporter);
                         }
                     }
                 }

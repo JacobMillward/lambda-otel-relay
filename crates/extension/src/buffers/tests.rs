@@ -173,9 +173,12 @@ fn prepend_empty_is_noop() {
     assert_eq!(current.traces.size_bytes, 4);
 }
 
+use tokio::sync::mpsc;
+
 #[test]
 fn prepend_and_evict_drops_oldest_first() {
-    let buf = OutboundBuffer::new(Some(10));
+    let (tx, _) = mpsc::channel(1);
+    let buf = OutboundBuffer::new(Some(10), tx);
 
     // Push 6 bytes of current data
     buf.push(Signal::Traces, Bytes::from("cur123")); // 6 bytes
@@ -195,7 +198,8 @@ fn prepend_and_evict_drops_oldest_first() {
 
 #[test]
 fn shared_take_and_prepend_round_trip() {
-    let buf = OutboundBuffer::new(None);
+    let (tx, _) = mpsc::channel(1);
+    let buf = OutboundBuffer::new(None, tx);
     buf.push(Signal::Traces, Bytes::from("t1"));
     buf.push(Signal::Metrics, Bytes::from("m1"));
 
@@ -211,7 +215,8 @@ fn shared_take_and_prepend_round_trip() {
 
 #[tokio::test]
 async fn spawn_flush_skips_if_in_flight() {
-    let buffer = OutboundBuffer::new(None);
+    let (tx, _) = mpsc::channel(1);
+    let buffer = OutboundBuffer::new(None, tx);
     buffer.push(Signal::Traces, Bytes::from("batch1"));
 
     let exporter = Arc::new(SlowExporter);
@@ -231,7 +236,8 @@ async fn spawn_flush_skips_if_in_flight() {
 
 #[tokio::test]
 async fn spawn_flush_returns_true_when_spawned() {
-    let buffer = OutboundBuffer::new(None);
+    let (tx, _) = mpsc::channel(1);
+    let buffer = OutboundBuffer::new(None, tx);
     buffer.push(Signal::Traces, Bytes::from("data"));
     let exporter = Arc::new(crate::testing::MockExporter);
     assert!(buffer.spawn_flush(&exporter));
@@ -239,7 +245,43 @@ async fn spawn_flush_returns_true_when_spawned() {
 
 #[tokio::test]
 async fn spawn_flush_returns_false_when_empty() {
-    let buffer = OutboundBuffer::new(None);
+    let (tx, _) = mpsc::channel(1);
+    let buffer = OutboundBuffer::new(None, tx);
     let exporter = Arc::new(crate::testing::MockExporter);
     assert!(!buffer.spawn_flush(&exporter));
+}
+
+#[tokio::test]
+async fn flush_notifies_when_complete() {
+    let (tx, mut rx) = mpsc::channel(1);
+
+    let buffer = OutboundBuffer::new(None, tx);
+    buffer.push(Signal::Traces, Bytes::from("cur123"));
+
+    let exporter = crate::testing::MockExporter {};
+    buffer.flush(&exporter).await;
+
+    assert_eq!(
+        rx.try_recv().unwrap(),
+        (),
+        "Expected notification for flush completion"
+    );
+}
+
+#[tokio::test]
+async fn spawn_flush_notifies_when_complete() {
+    let (tx, mut rx) = mpsc::channel(1);
+
+    let buffer = OutboundBuffer::new(None, tx);
+    buffer.push(Signal::Traces, Bytes::from("cur123"));
+
+    let exporter = Arc::new(crate::testing::MockExporter);
+    buffer.spawn_flush(&exporter);
+    buffer.join_flush_task().await;
+
+    assert_eq!(
+        rx.try_recv().unwrap(),
+        (),
+        "Expected notification for flush completion"
+    );
 }
