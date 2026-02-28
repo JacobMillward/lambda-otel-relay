@@ -11,7 +11,7 @@ use tracing::{debug, error};
 use crate::buffers::{OutboundBuffer, Signal};
 use crate::config::Config;
 use crate::exporter::Exporter;
-use crate::extensions_api::{self, ApiError, ExtensionsApi, ExtensionsApiEvent};
+use crate::extensions_api::{self, ApiError, ExitError, ExtensionsApi, ExtensionsApiEvent};
 use crate::telemetry_listener::TelemetryEvent;
 use crate::{otlp_listener, telemetry_listener};
 
@@ -45,11 +45,11 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
 
         let otlp_listener = TcpListener::bind(("127.0.0.1", config.listener_port))
             .await
-            .expect("failed to bind OTLP listener");
+            .map_err(|e| ApiError::InitFailed(format!("failed to bind OTLP listener: {e}")))?;
 
         let telemetry_listener = TcpListener::bind(("0.0.0.0", config.telemetry_port))
             .await
-            .expect("failed to bind telemetry listener");
+            .map_err(|e| ApiError::InitFailed(format!("failed to bind telemetry listener: {e}")))?;
         api.register_telemetry(config.telemetry_port).await?;
 
         let otlp_task = tokio::spawn(otlp_listener::serve(otlp_listener, otlp_tx, cancel.clone()));
@@ -73,10 +73,14 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
     }
 
     /// Run the event loop until it receives a Shutdown event from the extensions API.
-    pub async fn run(&mut self) {
+    ///
+    /// Returns `Ok(())` on clean shutdown, or `Err(ExitError)` if a listener
+    /// task died unexpectedly (channel closed while cancel token is not set).
+    pub async fn run(&mut self) -> Result<(), ExitError> {
         loop {
-            if let ControlFlow::Break(()) = self.tick().await {
-                break;
+            match self.tick().await {
+                ControlFlow::Break(result) => return result,
+                ControlFlow::Continue(()) => {}
             }
         }
     }
@@ -91,9 +95,9 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
     /// Extensions API, leaving an orphaned HTTP request that corrupts the RIE
     /// state machine.
     ///
-    /// Returns `ControlFlow::Break(())` when it receives a Shutdown event from the lambda extension API. Otherwise
-    /// returns `ControlFlow::Continue(())`.
-    async fn tick(&mut self) -> ControlFlow<()> {
+    /// Returns `ControlFlow::Break(Ok(()))` on clean shutdown, or
+    /// `ControlFlow::Break(Err(ExitError))` if a listener task died unexpectedly.
+    async fn tick(&mut self) -> ControlFlow<Result<(), ExitError>> {
         tokio::select! {
             event = &mut self.next_event_fut => {
                 match event {
@@ -120,7 +124,7 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                         // harmless — the buffer is about to be dropped.
                         self.buffer.flush(&*self.exporter).await;
 
-                        return ControlFlow::Break(());
+                        return ControlFlow::Break(Ok(()));
                     }
                     Err(e) => {
                         error!(error = %e, "extensions API error");
@@ -128,23 +132,41 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
                 }
                 self.next_event_fut.set(self.api.next_event());
             }
-            Some((signal, payload)) = self.otlp_rx.recv() => {
-                self.buffer.push(signal, payload);
-                if self.buffer.over_threshold() {
-                    self.buffer.spawn_flush(&self.exporter);
+            result = self.otlp_rx.recv() => {
+                match result {
+                    Some((signal, payload)) => {
+                        self.buffer.push(signal, payload);
+                        if self.buffer.over_threshold() {
+                            self.buffer.spawn_flush(&self.exporter);
+                        }
+                    }
+                    None if !self.cancel.is_cancelled() => {
+                        return ControlFlow::Break(Err(ExitError::RuntimeFailure(
+                            "OTLP listener died unexpectedly".into(),
+                        )));
+                    }
+                    None => {}
                 }
             }
-            Some(event) = self.telemetry_rx.recv() => {
-                match event {
-                    TelemetryEvent::RuntimeDone { request_id, status } => {
-                        debug!(request_id, status, "Received runtimeDone event");
-                        // TODO: update invocation state map, emit timeout log record
+            result = self.telemetry_rx.recv() => {
+                match result {
+                    Some(event) => match event {
+                        TelemetryEvent::RuntimeDone { request_id, status } => {
+                            debug!(request_id, status, "Received runtimeDone event");
+                            // TODO: update invocation state map, emit timeout log record
+                        }
+                        TelemetryEvent::Start { request_id, tracing_value } => {
+                            let _tracing_value = tracing_value;
+                            debug!(request_id, "Received start event");
+                            // TODO: extract X-Ray trace ID, store in state map
+                        }
                     }
-                    TelemetryEvent::Start { request_id, tracing_value } => {
-                        let _tracing_value = tracing_value;
-                        debug!(request_id, "Received start event");
-                        // TODO: extract X-Ray trace ID, store in state map
+                    None if !self.cancel.is_cancelled() => {
+                        return ControlFlow::Break(Err(ExitError::RuntimeFailure(
+                            "telemetry listener died unexpectedly".into(),
+                        )));
                     }
+                    None => {}
                 }
             }
         }
@@ -402,5 +424,27 @@ mod tests {
 
         // Buffer should be empty — the background flush exported everything
         assert!(event_loop.buffer.take().is_empty());
+    }
+
+    #[tokio::test]
+    async fn otlp_listener_crash_returns_exit_error() {
+        let (mock, _state) = MockApi::new(vec![]);
+
+        let mut config = dummy_config();
+        config.listener_port = 14322;
+        config.telemetry_port = 14323;
+
+        let mut event_loop = EventLoop::new(&mock, MockExporter, &config).await.unwrap();
+
+        // Kill the OTLP listener task — simulates a panic
+        event_loop.otlp_task.abort();
+
+        // tick() should detect the closed channel and return an error
+        match event_loop.tick().await {
+            ControlFlow::Break(Err(e)) => {
+                assert!(e.to_string().contains("OTLP listener"), "error: {e}");
+            }
+            other => panic!("expected Break(Err(...)), got {other:?}"),
+        }
     }
 }

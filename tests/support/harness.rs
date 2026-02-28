@@ -163,6 +163,42 @@ impl Harness {
         }
     }
 
+    /// Wait for the extension to emit a specific log message.
+    /// Used to detect errors or events without invoking the Lambda function.
+    #[allow(dead_code)]
+    pub async fn wait_for_extension_log(&self, message: &str, level: Option<LogLevel>) -> Logs {
+        self.wait_for_nth_occurrence(message, 1, EXTENSION_LOG_TARGET, level)
+            .await
+    }
+
+    /// Fire an invocation to flush the RIE's output buffer, then wait for a
+    /// specific extension log message. Useful when the extension crashes during
+    /// init — the RIE buffers all subprocess output until the first invocation.
+    pub async fn invoke_and_wait_for_extension_log(
+        &self,
+        message: &str,
+        level: Option<LogLevel>,
+    ) -> Logs {
+        let host_port = self
+            .container
+            .get_host_port_ipv4(8080.tcp())
+            .await
+            .expect("Failed to get mapped port");
+
+        // Fire-and-forget: the invocation will fail (extension is dead),
+        // but it triggers the RIE to flush buffered logs.
+        let _ = reqwest::Client::new()
+            .post(format!(
+                "http://127.0.0.1:{host_port}/2015-03-31/functions/function/invocations"
+            ))
+            .body("{}")
+            .send()
+            .await;
+
+        self.wait_for_nth_occurrence(message, 1, EXTENSION_LOG_TARGET, level)
+            .await
+    }
+
     /// Stop the container and return all captured logs.
     ///
     /// NOTE: This snapshots logs before the container is actually stopped (which

@@ -9,11 +9,10 @@ mod proto;
 mod telemetry_listener;
 
 use event_loop::EventLoop;
-use extensions_api::ExtensionApiClient;
+use extensions_api::{ExtensionApiClient, InitError};
 use tracing::error;
 
-/// Operational init failure — log and exit.
-/// Use `expect` instead for programming invariants (bugs).
+/// Exceptional init failure — log and exit.
 fn fatal(msg: &str, error: &dyn std::fmt::Display) -> ! {
     error!(%error, "{msg}");
     std::process::exit(1);
@@ -50,20 +49,38 @@ async fn main() {
     setup_logging();
     setup_rustls();
 
-    let config = config::Config::from_env().unwrap_or_else(|e| fatal("config error", &e));
-
-    let runtime_api = std::env::var("AWS_LAMBDA_RUNTIME_API")
-        .unwrap_or_else(|e| fatal("AWS_LAMBDA_RUNTIME_API not set in the environment. This extension must be run within a Lambda environment.", &e));
-
-    // Register with Extensions API
-    let ext = ExtensionApiClient::register(&runtime_api)
+    let ext = ExtensionApiClient::register()
         .await
         .unwrap_or_else(|e| fatal("failed to register extension", &e));
 
-    let exporter = exporter::OtlpExporter::new(&config);
-    let mut event_loop = EventLoop::new(&ext, exporter, &config)
-        .await
-        .unwrap_or_else(|e| fatal("failed to start event loop", &e));
+    // Config parsing moved after registration so errors can be reported
+    let config = match config::Config::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            let err = InitError::from(e);
+            error!(%err, "config error");
+            ext.report_init_error(&err).await;
+            std::process::exit(1);
+        }
+    };
 
-    event_loop.run().await;
+    let exporter = exporter::OtlpExporter::new(&config);
+    let mut event_loop = match EventLoop::new(&ext, exporter, &config).await {
+        Ok(el) => el,
+        Err(e) => {
+            let err = InitError::ListenerBind(e);
+            error!(%err, "failed to start event loop");
+            ext.report_init_error(&err).await;
+            std::process::exit(1);
+        }
+    };
+
+    match event_loop.run().await {
+        Ok(()) => {}
+        Err(e) => {
+            error!(%e, "runtime error");
+            ext.report_exit_error(&e).await;
+            std::process::exit(1);
+        }
+    }
 }
