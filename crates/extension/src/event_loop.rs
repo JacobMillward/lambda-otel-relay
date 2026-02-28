@@ -1,4 +1,5 @@
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use tokio::net::TcpListener;
@@ -9,7 +10,7 @@ use tracing::{debug, error};
 
 use crate::buffers::{OutboundBuffer, Signal};
 use crate::config::Config;
-use crate::exporter;
+use crate::exporter::Exporter;
 use crate::extensions_api::{self, ApiError, ExtensionsApi, ExtensionsApiEvent};
 use crate::telemetry_listener::TelemetryEvent;
 use crate::{otlp_listener, telemetry_listener};
@@ -18,9 +19,9 @@ use crate::{otlp_listener, telemetry_listener};
 ///
 /// Constructed in `main()` after registration, then driven by `run()`.
 /// Listener tasks are joined during shutdown to allow in-flight handlers to complete.
-pub struct EventLoop<'a, A: ExtensionsApi> {
+pub struct EventLoop<'a, A: ExtensionsApi, E: Exporter> {
     api: &'a A,
-    exporter: exporter::Exporter,
+    exporter: Arc<E>,
     buffer: OutboundBuffer,
     otlp_rx: mpsc::Receiver<(Signal, Bytes)>,
     telemetry_rx: mpsc::Receiver<TelemetryEvent>,
@@ -30,10 +31,14 @@ pub struct EventLoop<'a, A: ExtensionsApi> {
     next_event_fut: ReusableBoxFuture<'a, Result<ExtensionsApiEvent, ApiError>>,
 }
 
-impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
+impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
     /// Bind both listeners, register with the Telemetry API, and spawn
     /// the OTLP and telemetry server tasks.
-    pub async fn new(api: &'a A, config: &Config) -> Result<Self, extensions_api::ApiError> {
+    pub async fn new(
+        api: &'a A,
+        exporter: E,
+        config: &Config,
+    ) -> Result<Self, extensions_api::ApiError> {
         let cancel = CancellationToken::new();
         let (otlp_tx, otlp_rx) = mpsc::channel::<(Signal, Bytes)>(128);
         let (telemetry_tx, telemetry_rx) = mpsc::channel::<TelemetryEvent>(64);
@@ -56,8 +61,8 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
 
         Ok(Self {
             api,
-            exporter: exporter::Exporter::new(config),
-            buffer: OutboundBuffer::new(),
+            exporter: Arc::new(exporter),
+            buffer: OutboundBuffer::new(config.buffer_max_bytes),
             otlp_rx,
             telemetry_rx,
             cancel,
@@ -94,16 +99,12 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
                 match event {
                     Ok(ExtensionsApiEvent::Invoke { request_id }) => {
                         debug!(request_id, "Received invoke event");
-                        // TODO: record invocation metadata in state map
-
-                        // Post-invocation flush: export buffered data from previous invocation
-                        if let Err(e) = self.exporter.export(&mut self.buffer).await {
-                            error!(error = %e, "flush failed");
-                        }
+                        self.buffer.flush(&*self.exporter).await;
                     }
                     Ok(ExtensionsApiEvent::Shutdown { reason }) => {
                         debug!(reason, "Received shutdown event");
                         self.cancel.cancel();
+                        self.buffer.join_flush_task().await;
 
                         // Wait for listener tasks to finish in-flight handlers.
                         // Once they exit, their channel senders are dropped.
@@ -115,9 +116,9 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
                             self.buffer.push(signal, payload);
                         }
 
-                        if let Err(e) = self.exporter.export(&mut self.buffer).await {
-                            error!(error = %e, "shutdown flush failed");
-                        }
+                        // Best-effort final flush. prepend_failed inside flush is
+                        // harmless — the buffer is about to be dropped.
+                        self.buffer.flush(&*self.exporter).await;
 
                         return ControlFlow::Break(());
                     }
@@ -129,8 +130,9 @@ impl<'a, A: ExtensionsApi> EventLoop<'a, A> {
             }
             Some((signal, payload)) = self.otlp_rx.recv() => {
                 self.buffer.push(signal, payload);
-                // TODO: race flush trigger (mid-invocation background flush)
-                // TODO: buffer size threshold flush
+                if self.buffer.over_threshold() {
+                    self.buffer.spawn_flush(&self.exporter);
+                }
             }
             Some(event) = self.telemetry_rx.recv() => {
                 match event {
@@ -159,7 +161,46 @@ mod tests {
     use tokio::sync::{Mutex, Notify};
 
     use super::*;
+    use crate::buffers::BufferData;
+    use crate::exporter::{ExportError, Exporter};
     use crate::extensions_api::ApiError;
+
+    struct MockExporter;
+
+    impl Exporter for MockExporter {
+        async fn export(&self, data: &mut BufferData) -> Result<(), ExportError> {
+            data.traces.clear();
+            data.metrics.clear();
+            data.logs.clear();
+            Ok(())
+        }
+    }
+
+    struct FailingExporter;
+
+    impl Exporter for FailingExporter {
+        async fn export(&self, _data: &mut BufferData) -> Result<(), ExportError> {
+            Err(ExportError::Rejected {
+                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            })
+        }
+    }
+
+    /// Simulates partial failure: traces export succeeds, metrics fails.
+    struct PartialFailExporter;
+
+    impl Exporter for PartialFailExporter {
+        async fn export(&self, data: &mut BufferData) -> Result<(), ExportError> {
+            // Traces succeed — clear them
+            data.traces.clear();
+            // Metrics fail — leave them untouched
+            // Logs succeed — clear them
+            data.logs.clear();
+            Err(ExportError::Rejected {
+                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            })
+        }
+    }
 
     struct MockApiState {
         next_event_calls: AtomicU32,
@@ -213,6 +254,7 @@ mod tests {
             export_timeout: std::time::Duration::from_millis(100),
             compression: crate::config::Compression::None,
             export_headers: vec![],
+            buffer_max_bytes: Some(4_194_304),
         }
     }
 
@@ -232,7 +274,7 @@ mod tests {
         })]);
 
         let config = dummy_config();
-        let mut event_loop = EventLoop::new(&mock, &config).await.unwrap();
+        let mut event_loop = EventLoop::new(&mock, MockExporter, &config).await.unwrap();
 
         // Send 2 OTLP payloads via HTTP to trigger the channel branch of select!.
         // The listener is already bound and accepting, so these are queued
@@ -263,5 +305,102 @@ mod tests {
             1,
             "next_event must be called exactly once — the future must not be dropped and recreated"
         );
+    }
+
+    #[tokio::test]
+    async fn failed_flush_prepends_data_back() {
+        let buffer = OutboundBuffer::new(Some(1_000_000));
+        buffer.push(Signal::Traces, Bytes::from("trace_data"));
+        buffer.push(Signal::Metrics, Bytes::from("metric_data"));
+
+        let exporter = Arc::new(FailingExporter);
+        buffer.spawn_flush(&exporter);
+        buffer.join_flush_task().await;
+
+        // Data should be prepended back since export failed
+        let data = buffer.take();
+        assert!(!data.is_empty());
+        assert_eq!(data.traces.queue.len(), 1);
+        assert_eq!(data.traces.queue[0], Bytes::from("trace_data"));
+        assert_eq!(data.metrics.queue.len(), 1);
+        assert_eq!(data.metrics.queue[0], Bytes::from("metric_data"));
+    }
+
+    #[tokio::test]
+    async fn sync_flush_joins_background_task() {
+        let buffer = OutboundBuffer::new(None);
+        buffer.push(Signal::Traces, Bytes::from("data"));
+
+        let exporter = Arc::new(MockExporter);
+
+        // Spawn a background flush
+        buffer.spawn_flush(&exporter);
+
+        // Push more data while background flush is (potentially) in-flight
+        buffer.push(Signal::Logs, Bytes::from("new_data"));
+
+        // Sync flush should join the background task, then flush remaining
+        buffer.flush(&*exporter).await;
+
+        assert!(buffer.take().is_empty());
+    }
+
+    #[tokio::test]
+    async fn partial_failure_preserves_only_failed_signals() {
+        let buffer = OutboundBuffer::new(None);
+        buffer.push(Signal::Traces, Bytes::from("trace_data"));
+        buffer.push(Signal::Metrics, Bytes::from("metric_data"));
+        buffer.push(Signal::Logs, Bytes::from("log_data"));
+
+        let exporter = Arc::new(PartialFailExporter);
+        buffer.spawn_flush(&exporter);
+        buffer.join_flush_task().await;
+
+        // Only metrics should remain — traces and logs were cleared by the exporter
+        let data = buffer.take();
+        assert!(data.traces.is_empty());
+        assert_eq!(data.metrics.queue.len(), 1);
+        assert_eq!(data.metrics.queue[0], Bytes::from("metric_data"));
+        assert!(data.logs.is_empty());
+    }
+
+    /// Verify that the OTLP receive → threshold → spawn_flush path works
+    /// end-to-end through `tick()`.
+    #[tokio::test]
+    async fn threshold_triggers_background_flush_via_tick() {
+        let (mock, state) = MockApi::new(vec![Ok(ExtensionsApiEvent::Shutdown {
+            reason: "test".into(),
+        })]);
+
+        // Use different ports to avoid collisions with other event loop tests
+        let mut config = dummy_config();
+        config.listener_port = 14320;
+        config.telemetry_port = 14321;
+        config.buffer_max_bytes = Some(1);
+
+        let mut event_loop = EventLoop::new(&mock, MockExporter, &config).await.unwrap();
+
+        // Send a payload that exceeds the 1-byte threshold
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!(
+                "http://127.0.0.1:{}/v1/traces",
+                config.listener_port
+            ))
+            .body(b"\x0a\x00".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // This tick receives the payload and should trigger spawn_flush
+        let _ = event_loop.tick().await;
+
+        // Send shutdown to cleanly exit
+        state.release.notify_one();
+        let _ = event_loop.tick().await;
+
+        // Buffer should be empty — the background flush exported everything
+        assert!(event_loop.buffer.take().is_empty());
     }
 }

@@ -8,7 +8,7 @@ use reqwest::Client;
 use thiserror::Error;
 use url::Url;
 
-use crate::buffers::OutboundBuffer;
+use crate::buffers::BufferData;
 use crate::config::{Compression, Config};
 use crate::merge;
 
@@ -24,14 +24,23 @@ pub enum ExportError {
     Compression(#[from] std::io::Error),
 }
 
-pub struct Exporter {
+/// Abstraction over exporting telemetry data to a collector.
+///
+/// The returned future must be `Send` because `OutboundBuffer::spawn_flush`
+/// calls `exporter.export()` inside `tokio::spawn`.
+pub trait Exporter: Send + Sync + 'static {
+    fn export(&self, data: &mut BufferData)
+    -> impl Future<Output = Result<(), ExportError>> + Send;
+}
+
+pub struct OtlpExporter {
     client: Client,
     endpoint: Url,
     compression: Compression,
     headers: Vec<(String, String)>,
 }
 
-impl Exporter {
+impl OtlpExporter {
     pub fn new(config: &Config) -> Self {
         let client = Client::builder()
             .timeout(config.export_timeout)
@@ -44,30 +53,6 @@ impl Exporter {
             compression: config.compression,
             headers: config.export_headers.clone(),
         }
-    }
-
-    pub async fn export(&self, buffer: &mut OutboundBuffer) -> Result<(), ExportError> {
-        if buffer.is_empty() {
-            return Ok(());
-        }
-
-        let (t, m, l) = tokio::join!(
-            self.export_traces(&buffer.traces.queue),
-            self.export_metrics(&buffer.metrics.queue),
-            self.export_logs(&buffer.logs.queue),
-        );
-
-        if t.is_ok() {
-            buffer.traces.clear();
-        }
-        if m.is_ok() {
-            buffer.metrics.clear();
-        }
-        if l.is_ok() {
-            buffer.logs.clear();
-        }
-
-        t.and(m).and(l)
     }
 
     async fn export_traces(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
@@ -120,6 +105,32 @@ impl Exporter {
                 status: resp.status(),
             })
         }
+    }
+}
+
+impl Exporter for OtlpExporter {
+    async fn export(&self, data: &mut BufferData) -> Result<(), ExportError> {
+        if data.is_empty() {
+            return Ok(());
+        }
+
+        let (t, m, l) = tokio::join!(
+            self.export_traces(&data.traces.queue),
+            self.export_metrics(&data.metrics.queue),
+            self.export_logs(&data.logs.queue),
+        );
+
+        if t.is_ok() {
+            data.traces.clear();
+        }
+        if m.is_ok() {
+            data.metrics.clear();
+        }
+        if l.is_ok() {
+            data.logs.clear();
+        }
+
+        t.and(m).and(l)
     }
 }
 
