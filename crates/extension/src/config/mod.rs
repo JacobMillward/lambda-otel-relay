@@ -60,11 +60,11 @@ impl Config {
         let compression = parse_compression(vars)?;
         let export_headers = parse_headers(vars);
         let buffer_max_bytes = parse_buffer_max_bytes(vars, "LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES")?;
-        let flush_strategy = FlushStrategy::parse(
-            vars.get("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY")
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-        )?;
+        let flush_strategy = vars
+            .get("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY")
+            .map(|s| s.as_str())
+            .unwrap_or("")
+            .parse()?;
 
         Ok(Self {
             endpoint,
