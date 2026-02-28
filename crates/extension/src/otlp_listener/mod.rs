@@ -1,7 +1,3 @@
-mod events;
-
-pub use events::TelemetryEvent;
-
 use std::convert::Infallible;
 
 use bytes::Bytes;
@@ -14,6 +10,8 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::buffers::Signal;
+
 fn response(status: StatusCode) -> Response<Full<Bytes>> {
     Response::builder()
         .status(status)
@@ -21,70 +19,70 @@ fn response(status: StatusCode) -> Response<Full<Bytes>> {
         .unwrap()
 }
 
-/// Validate the incoming request and return the body as a string.
-async fn validate<B>(req: Request<B>) -> Result<String, (StatusCode, String)>
+/// Validate the incoming request: route, method, and body.
+async fn validate<B>(req: Request<B>) -> Result<(Signal, Bytes), (StatusCode, String)>
 where
     B: hyper::body::Body<Data = Bytes> + Send + 'static,
 {
+    let path = req.uri().path().to_owned();
     let method = req.method().clone();
 
-    if method != Method::POST {
-        return Err((
-            StatusCode::METHOD_NOT_ALLOWED,
-            format!("{method} not allowed"),
-        ));
+    let signal = match path.as_str() {
+        "/v1/traces" => Ok(Signal::Traces),
+        "/v1/metrics" => Ok(Signal::Metrics),
+        "/v1/logs" => Ok(Signal::Logs),
+        _ => Err((StatusCode::NOT_FOUND, format!("unknown path: {path}"))),
     }
+    .and_then(|signal| {
+        if method == Method::POST {
+            Ok(signal)
+        } else {
+            Err((StatusCode::METHOD_NOT_ALLOWED, format!("{method} {path}")))
+        }
+    })?;
 
-    let body = req
-        .collect()
-        .await
-        .map_err(|_| (StatusCode::BAD_REQUEST, "failed to read body".to_owned()))?;
-
-    String::from_utf8(body.to_bytes().to_vec()).map_err(|_| {
+    let body = req.collect().await.map(|c| c.to_bytes()).map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
-            "body is not valid UTF-8".to_owned(),
+            format!("POST {path} — failed to read body"),
         )
-    })
+    })?;
+
+    Ok((signal, body))
 }
 
-/// Handle a batch of telemetry events from the Lambda platform.
-/// Lambda POSTs a JSON array of Event objects to this endpoint.
-/// We always respond 200 — Lambda does not retry on failure.
-/// https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html
 async fn handle<B>(
     req: Request<B>,
-    tx: mpsc::Sender<TelemetryEvent>,
+    tx: mpsc::Sender<(Signal, Bytes)>,
 ) -> Result<Response<Full<Bytes>>, Infallible>
 where
     B: hyper::body::Body<Data = Bytes> + Send + 'static,
 {
-    let body_str = match validate(req).await {
-        Ok(s) => s,
+    let (signal, body) = match validate(req).await {
+        Ok(pair) => pair,
         Err((status, reason)) => {
-            tracing::warn!(reason, "telemetry request rejected");
+            tracing::warn!(reason, "otlp request rejected");
             return Ok(response(status));
         }
     };
 
-    let events = TelemetryEvent::parse_batch(&body_str);
-    for event in events {
-        if let Err(e) = tx.try_send(event) {
-            tracing::warn!(error = %e, "telemetry event dropped");
-        }
+    use tokio::sync::mpsc::error::TrySendError;
+    match tx.try_send((signal, body)) {
+        Ok(()) => Ok(response(StatusCode::OK)),
+        Err(TrySendError::Full(_)) => Ok(Response::builder()
+            .status(StatusCode::SERVICE_UNAVAILABLE)
+            .header("Retry-After", "1")
+            .body(Full::default())
+            .unwrap()),
+        // Channel closed means the receiver is gone (shutdown). Retrying won't
+        // help — return 502 since this proxy's backend is no longer available.
+        Err(TrySendError::Closed(_)) => Ok(response(StatusCode::BAD_GATEWAY)),
     }
-
-    Ok(response(StatusCode::OK))
 }
 
-/// Telemetry API listener.
-/// Receives platform events (platform.runtimeDone, platform.start) from the
-/// Lambda platform. The listener must already be bound to 0.0.0.0, not
-/// localhost, to be reachable by the Lambda sandbox.
-/// https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api-reference.html
 pub async fn serve(
     listener: TcpListener,
-    tx: mpsc::Sender<TelemetryEvent>,
+    tx: mpsc::Sender<(Signal, Bytes)>,
     cancel: CancellationToken,
 ) {
     loop {
@@ -110,5 +108,4 @@ pub async fn serve(
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
 mod tests;
