@@ -41,24 +41,24 @@ pub enum ConfigError {
     #[error("LAMBDA_OTEL_RELAY_CLIENT_CERT and LAMBDA_OTEL_RELAY_CLIENT_KEY must both be set")]
     ClientIdentityIncomplete,
 
-    #[error("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE is set but AWS credentials are missing \
+    #[error("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE is set but AWS credentials are missing \
              (need AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_SESSION_TOKEN)")]
     SigV4MissingCredentials,
 
-    #[error("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE is set but no AWS region found \
-             (set LAMBDA_OTEL_RELAY_AWSSIGV4_REGION, AWS_REGION, or AWS_DEFAULT_REGION)")]
+    #[error("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE is set but no AWS region found \
+             (set LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION, AWS_REGION, or AWS_DEFAULT_REGION)")]
     SigV4MissingRegion,
 }
 
 /// Configuration for AWS SigV4 request signing.
 ///
-/// Enabled by setting `LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE` to the target AWS
+/// Enabled by setting `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE` to the target AWS
 /// service code (e.g. `aps` for Amazon Managed Grafana, `xray` for X-Ray).
 /// You can use [`aws service-quotas list-services`] to find service codes.
 ///
 /// [`aws service-quotas list-services`]: https://docs.aws.amazon.com/cli/latest/reference/service-quotas/list-services.html
 ///
-/// The signing region is read from `LAMBDA_OTEL_RELAY_AWSSIGV4_REGION`, falling
+/// The signing region is read from `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION`, falling
 /// back to `AWS_REGION` then `AWS_DEFAULT_REGION`.
 ///
 /// AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
@@ -224,7 +224,7 @@ fn parse_certificate_file(
 
 fn parse_sigv4(vars: &HashMap<String, String>) -> Result<Option<SigV4Config>, ConfigError> {
     let service = match vars
-        .get("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE")
+        .get("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE")
         .filter(|s| !s.is_empty())
     {
         Some(s) => s.clone(),
@@ -232,7 +232,7 @@ fn parse_sigv4(vars: &HashMap<String, String>) -> Result<Option<SigV4Config>, Co
     };
 
     let region = vars
-        .get("LAMBDA_OTEL_RELAY_AWSSIGV4_REGION")
+        .get("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION")
         .or_else(|| vars.get("AWS_REGION"))
         .or_else(|| vars.get("AWS_DEFAULT_REGION"))
         .filter(|s| !s.is_empty())
