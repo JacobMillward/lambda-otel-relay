@@ -143,11 +143,7 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
             result = self.otlp_rx.recv() => {
                 match result {
                     Some((signal, payload)) => {
-                        if self.buffer.push_and_maybe_flush(
-                            signal, payload, &self.exporter,
-                        ) {
-                            self.flush_coordinator.record_flush();
-                        }
+                        self.buffer.push_and_maybe_flush(signal, payload, &self.exporter);
                     }
                     None if !self.cancel.is_cancelled() => {
                         return ControlFlow::Break(Err(ExitError::RuntimeFailure(
