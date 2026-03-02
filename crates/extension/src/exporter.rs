@@ -4,7 +4,7 @@ use std::io::Write;
 use std::time::SystemTime;
 
 use aws_credential_types::Credentials;
-use aws_sigv4::http_request::{sign, SignableBody, SignableRequest, SigningSettings};
+use aws_sigv4::http_request::{SignableBody, SignableRequest, SigningSettings, sign};
 use aws_sigv4::sign::v4;
 use bytes::Bytes;
 use flate2::write::GzEncoder;
@@ -129,9 +129,10 @@ impl OtlpExporter {
     async fn post_body(&self, path: &str, protobuf: &[u8]) -> Result<(), ExportError> {
         let url = self.endpoint.join(path).expect("invalid export path");
 
-        let mut headers: Vec<(String, String)> = vec![
-            ("content-type".to_owned(), "application/x-protobuf".to_owned()),
-        ];
+        let mut headers: Vec<(String, String)> = vec![(
+            "content-type".to_owned(),
+            "application/x-protobuf".to_owned(),
+        )];
 
         let body = match self.compression {
             Compression::Gzip => {
@@ -212,9 +213,7 @@ fn sign_request(
         .ok()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ExportError::Signing("AWS_SECRET_ACCESS_KEY not set".into()))?;
-    let session_token = env::var("AWS_SESSION_TOKEN")
-        .ok()
-        .filter(|s| !s.is_empty());
+    let session_token = env::var("AWS_SESSION_TOKEN").ok().filter(|s| !s.is_empty());
 
     let credentials = Credentials::new(
         access_key,

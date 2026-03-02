@@ -395,9 +395,10 @@ fn client_cert_and_key_both_set() {
 
 #[test]
 fn sigv4_disabled_when_service_not_set() {
-    let config = Config::parse(&vars(&[
-        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-    ]))
+    let config = Config::parse(&vars(&[(
+        "LAMBDA_OTEL_RELAY_ENDPOINT",
+        "http://localhost:4318",
+    )]))
     .unwrap();
     assert!(config.sigv4.is_none());
 }
@@ -419,7 +420,10 @@ fn sigv4_enabled_with_all_required_vars() {
         ("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE", "aps"),
         ("AWS_REGION", "us-east-1"),
         ("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE"),
-        ("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"),
+        (
+            "AWS_SECRET_ACCESS_KEY",
+            "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+        ),
         ("AWS_SESSION_TOKEN", "FwoGZXIvY..."),
     ]))
     .unwrap();

@@ -41,12 +41,16 @@ pub enum ConfigError {
     #[error("LAMBDA_OTEL_RELAY_CLIENT_CERT and LAMBDA_OTEL_RELAY_CLIENT_KEY must both be set")]
     ClientIdentityIncomplete,
 
-    #[error("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE is set but AWS credentials are missing \
-             (need AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_SESSION_TOKEN)")]
+    #[error(
+        "LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE is set but AWS credentials are missing \
+             (need AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_SESSION_TOKEN)"
+    )]
     SigV4MissingCredentials,
 
-    #[error("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE is set but no AWS region found \
-             (set LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION, AWS_REGION, or AWS_DEFAULT_REGION)")]
+    #[error(
+        "LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE is set but no AWS region found \
+             (set LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION, AWS_REGION, or AWS_DEFAULT_REGION)"
+    )]
     SigV4MissingRegion,
 }
 
@@ -243,9 +247,7 @@ fn parse_sigv4(vars: &HashMap<String, String>) -> Result<Option<SigV4Config>, Co
     let has_secret = vars
         .get("AWS_SECRET_ACCESS_KEY")
         .is_some_and(|s| !s.is_empty());
-    let has_token = vars
-        .get("AWS_SESSION_TOKEN")
-        .is_some_and(|s| !s.is_empty());
+    let has_token = vars.get("AWS_SESSION_TOKEN").is_some_and(|s| !s.is_empty());
     if !has_key || !has_secret || !has_token {
         return Err(ConfigError::SigV4MissingCredentials);
     }
