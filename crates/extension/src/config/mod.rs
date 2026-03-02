@@ -53,7 +53,10 @@ pub enum ConfigError {
 /// Configuration for AWS SigV4 request signing.
 ///
 /// Enabled by setting `LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE` to the target AWS
-/// service name (e.g. `aps` for Amazon Managed Grafana, `xray` for X-Ray).
+/// service code (e.g. `aps` for Amazon Managed Grafana, `xray` for X-Ray).
+/// You can use [`aws service-quotas list-services`] to find service codes.
+///
+/// [`aws service-quotas list-services`]: https://docs.aws.amazon.com/cli/latest/reference/service-quotas/list-services.html
 ///
 /// The signing region is read from `LAMBDA_OTEL_RELAY_AWSSIGV4_REGION`, falling
 /// back to `AWS_REGION` then `AWS_DEFAULT_REGION`.
