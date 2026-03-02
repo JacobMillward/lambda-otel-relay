@@ -392,3 +392,121 @@ fn client_cert_and_key_both_set() {
         Some(b"key-pem".as_slice())
     );
 }
+
+#[test]
+fn sigv4_disabled_when_service_not_set() {
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+    ]))
+    .unwrap();
+    assert!(config.sigv4.is_none());
+}
+
+#[test]
+fn sigv4_disabled_when_service_empty() {
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", ""),
+    ]))
+    .unwrap();
+    assert!(config.sigv4.is_none());
+}
+
+#[test]
+fn sigv4_enabled_with_all_required_vars() {
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("AWS_REGION", "us-east-1"),
+        ("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"),
+        ("AWS_SESSION_TOKEN", "FwoGZXIvY..."),
+    ]))
+    .unwrap();
+    let sigv4 = config.sigv4.as_ref().unwrap();
+    assert_eq!(sigv4.service, "aps");
+    assert_eq!(sigv4.region, "us-east-1");
+}
+
+#[test]
+fn sigv4_region_override() {
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("LAMBDA_OTEL_RELAY_AWS_REGION", "eu-west-1"),
+        ("AWS_REGION", "us-east-1"),
+        ("AWS_ACCESS_KEY_ID", "AKID"),
+        ("AWS_SECRET_ACCESS_KEY", "SECRET"),
+        ("AWS_SESSION_TOKEN", "TOKEN"),
+    ]))
+    .unwrap();
+    let sigv4 = config.sigv4.as_ref().unwrap();
+    assert_eq!(sigv4.region, "eu-west-1");
+}
+
+#[test]
+fn sigv4_falls_back_to_aws_default_region() {
+    let config = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("AWS_DEFAULT_REGION", "ap-southeast-2"),
+        ("AWS_ACCESS_KEY_ID", "AKID"),
+        ("AWS_SECRET_ACCESS_KEY", "SECRET"),
+        ("AWS_SESSION_TOKEN", "TOKEN"),
+    ]))
+    .unwrap();
+    let sigv4 = config.sigv4.as_ref().unwrap();
+    assert_eq!(sigv4.region, "ap-southeast-2");
+}
+
+#[test]
+fn sigv4_missing_region_errors() {
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("AWS_ACCESS_KEY_ID", "AKID"),
+        ("AWS_SECRET_ACCESS_KEY", "SECRET"),
+        ("AWS_SESSION_TOKEN", "TOKEN"),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::SigV4MissingRegion));
+}
+
+#[test]
+fn sigv4_missing_access_key_errors() {
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("AWS_REGION", "us-east-1"),
+        ("AWS_SECRET_ACCESS_KEY", "SECRET"),
+        ("AWS_SESSION_TOKEN", "TOKEN"),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::SigV4MissingCredentials));
+}
+
+#[test]
+fn sigv4_missing_secret_key_errors() {
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("AWS_REGION", "us-east-1"),
+        ("AWS_ACCESS_KEY_ID", "AKID"),
+        ("AWS_SESSION_TOKEN", "TOKEN"),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::SigV4MissingCredentials));
+}
+
+#[test]
+fn sigv4_missing_session_token_errors() {
+    let err = Config::parse(&vars(&[
+        ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("AWS_REGION", "us-east-1"),
+        ("AWS_ACCESS_KEY_ID", "AKID"),
+        ("AWS_SECRET_ACCESS_KEY", "SECRET"),
+    ]))
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::SigV4MissingCredentials));
+}
