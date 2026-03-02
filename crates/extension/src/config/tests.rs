@@ -406,7 +406,7 @@ fn sigv4_disabled_when_service_not_set() {
 fn sigv4_disabled_when_service_empty() {
     let config = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", ""),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE", ""),
     ]))
     .unwrap();
     assert!(config.sigv4.is_none());
@@ -416,7 +416,7 @@ fn sigv4_disabled_when_service_empty() {
 fn sigv4_enabled_with_all_required_vars() {
     let config = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE", "aps"),
         ("AWS_REGION", "us-east-1"),
         ("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE"),
         ("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"),
@@ -432,8 +432,8 @@ fn sigv4_enabled_with_all_required_vars() {
 fn sigv4_region_override() {
     let config = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
-        ("LAMBDA_OTEL_RELAY_AWS_REGION", "eu-west-1"),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE", "aps"),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_REGION", "eu-west-1"),
         ("AWS_REGION", "us-east-1"),
         ("AWS_ACCESS_KEY_ID", "AKID"),
         ("AWS_SECRET_ACCESS_KEY", "SECRET"),
@@ -448,7 +448,7 @@ fn sigv4_region_override() {
 fn sigv4_falls_back_to_aws_default_region() {
     let config = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE", "aps"),
         ("AWS_DEFAULT_REGION", "ap-southeast-2"),
         ("AWS_ACCESS_KEY_ID", "AKID"),
         ("AWS_SECRET_ACCESS_KEY", "SECRET"),
@@ -463,7 +463,7 @@ fn sigv4_falls_back_to_aws_default_region() {
 fn sigv4_missing_region_errors() {
     let err = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE", "aps"),
         ("AWS_ACCESS_KEY_ID", "AKID"),
         ("AWS_SECRET_ACCESS_KEY", "SECRET"),
         ("AWS_SESSION_TOKEN", "TOKEN"),
@@ -476,7 +476,7 @@ fn sigv4_missing_region_errors() {
 fn sigv4_missing_access_key_errors() {
     let err = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE", "aps"),
         ("AWS_REGION", "us-east-1"),
         ("AWS_SECRET_ACCESS_KEY", "SECRET"),
         ("AWS_SESSION_TOKEN", "TOKEN"),
@@ -489,7 +489,7 @@ fn sigv4_missing_access_key_errors() {
 fn sigv4_missing_secret_key_errors() {
     let err = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE", "aps"),
         ("AWS_REGION", "us-east-1"),
         ("AWS_ACCESS_KEY_ID", "AKID"),
         ("AWS_SESSION_TOKEN", "TOKEN"),
@@ -502,7 +502,7 @@ fn sigv4_missing_secret_key_errors() {
 fn sigv4_missing_session_token_errors() {
     let err = Config::parse(&vars(&[
         ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
-        ("LAMBDA_OTEL_RELAY_AWS_SERVICE", "aps"),
+        ("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE", "aps"),
         ("AWS_REGION", "us-east-1"),
         ("AWS_ACCESS_KEY_ID", "AKID"),
         ("AWS_SECRET_ACCESS_KEY", "SECRET"),

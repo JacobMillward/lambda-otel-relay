@@ -41,21 +41,21 @@ pub enum ConfigError {
     #[error("LAMBDA_OTEL_RELAY_CLIENT_CERT and LAMBDA_OTEL_RELAY_CLIENT_KEY must both be set")]
     ClientIdentityIncomplete,
 
-    #[error("LAMBDA_OTEL_RELAY_AWS_SERVICE is set but AWS credentials are missing \
+    #[error("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE is set but AWS credentials are missing \
              (need AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_SESSION_TOKEN)")]
     SigV4MissingCredentials,
 
-    #[error("LAMBDA_OTEL_RELAY_AWS_SERVICE is set but no AWS region found \
-             (set LAMBDA_OTEL_RELAY_AWS_REGION, AWS_REGION, or AWS_DEFAULT_REGION)")]
+    #[error("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE is set but no AWS region found \
+             (set LAMBDA_OTEL_RELAY_AWSSIGV4_REGION, AWS_REGION, or AWS_DEFAULT_REGION)")]
     SigV4MissingRegion,
 }
 
 /// Configuration for AWS SigV4 request signing.
 ///
-/// Enabled by setting `LAMBDA_OTEL_RELAY_AWS_SERVICE` to the target AWS
+/// Enabled by setting `LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE` to the target AWS
 /// service name (e.g. `aps` for Amazon Managed Grafana, `xray` for X-Ray).
 ///
-/// The signing region is read from `LAMBDA_OTEL_RELAY_AWS_REGION`, falling
+/// The signing region is read from `LAMBDA_OTEL_RELAY_AWSSIGV4_REGION`, falling
 /// back to `AWS_REGION` then `AWS_DEFAULT_REGION`.
 ///
 /// AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
@@ -221,7 +221,7 @@ fn parse_certificate_file(
 
 fn parse_sigv4(vars: &HashMap<String, String>) -> Result<Option<SigV4Config>, ConfigError> {
     let service = match vars
-        .get("LAMBDA_OTEL_RELAY_AWS_SERVICE")
+        .get("LAMBDA_OTEL_RELAY_AWSSIGV4_SERVICE")
         .filter(|s| !s.is_empty())
     {
         Some(s) => s.clone(),
@@ -229,7 +229,7 @@ fn parse_sigv4(vars: &HashMap<String, String>) -> Result<Option<SigV4Config>, Co
     };
 
     let region = vars
-        .get("LAMBDA_OTEL_RELAY_AWS_REGION")
+        .get("LAMBDA_OTEL_RELAY_AWSSIGV4_REGION")
         .or_else(|| vars.get("AWS_REGION"))
         .or_else(|| vars.get("AWS_DEFAULT_REGION"))
         .filter(|s| !s.is_empty())
