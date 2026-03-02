@@ -1,6 +1,11 @@
 use std::collections::VecDeque;
+use std::env;
 use std::io::Write;
+use std::time::SystemTime;
 
+use aws_credential_types::Credentials;
+use aws_sigv4::http_request::{SignableBody, SignableRequest, SigningSettings, sign};
+use aws_sigv4::sign::v4;
 use bytes::Bytes;
 use flate2::write::GzEncoder;
 use prost::Message;
@@ -9,7 +14,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::buffers::BufferData;
-use crate::config::{Compression, Config};
+use crate::config::{Compression, Config, SigV4Config};
 use crate::merge;
 
 #[derive(Debug, Error)]
@@ -22,6 +27,9 @@ pub enum ExportError {
 
     #[error("gzip compression failed: {0}")]
     Compression(#[from] std::io::Error),
+
+    #[error("SigV4 signing failed: {0}")]
+    Signing(String),
 }
 
 #[derive(Debug, Error)]
@@ -50,6 +58,7 @@ pub struct OtlpExporter {
     endpoint: Url,
     compression: Compression,
     headers: Vec<(String, String)>,
+    sigv4: Option<SigV4Config>,
 }
 
 impl OtlpExporter {
@@ -80,6 +89,7 @@ impl OtlpExporter {
             endpoint: config.endpoint.clone(),
             compression: config.compression,
             headers: config.export_headers.clone(),
+            sigv4: config.sigv4.clone(),
         })
     }
 
@@ -119,21 +129,31 @@ impl OtlpExporter {
     async fn post_body(&self, path: &str, protobuf: &[u8]) -> Result<(), ExportError> {
         let url = self.endpoint.join(path).expect("invalid export path");
 
-        let mut req = self
-            .client
-            .post(url)
-            .header("content-type", "application/x-protobuf");
+        let mut headers: Vec<(String, String)> = vec![(
+            "content-type".to_owned(),
+            "application/x-protobuf".to_owned(),
+        )];
 
         let body = match self.compression {
             Compression::Gzip => {
-                req = req.header("content-encoding", "gzip");
+                headers.push(("content-encoding".to_owned(), "gzip".to_owned()));
                 compress_gzip(protobuf)?
             }
             Compression::None => protobuf.to_vec(),
         };
 
         for (k, v) in &self.headers {
-            req = req.header(k, v);
+            headers.push((k.clone(), v.clone()));
+        }
+
+        if let Some(sigv4) = &self.sigv4 {
+            let signing_headers = sign_request(sigv4, url.as_str(), &headers, &body)?;
+            headers.extend(signing_headers);
+        }
+
+        let mut req = self.client.post(url);
+        for (k, v) in &headers {
+            req = req.header(k.as_str(), v.as_str());
         }
 
         let resp = req.body(body).send().await?;
@@ -172,6 +192,64 @@ impl Exporter for OtlpExporter {
 
         t.and(m).and(l)
     }
+}
+
+/// Read credentials from the environment and sign the request.
+///
+/// Returns the signing headers to add to the request. Credentials are read
+/// fresh on each call because Lambda rotates them during the extension's
+/// lifetime.
+fn sign_request(
+    sigv4: &SigV4Config,
+    url: &str,
+    headers: &[(String, String)],
+    body: &[u8],
+) -> Result<Vec<(String, String)>, ExportError> {
+    let access_key = env::var("AWS_ACCESS_KEY_ID")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ExportError::Signing("AWS_ACCESS_KEY_ID not set".into()))?;
+    let secret_key = env::var("AWS_SECRET_ACCESS_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ExportError::Signing("AWS_SECRET_ACCESS_KEY not set".into()))?;
+    let session_token = env::var("AWS_SESSION_TOKEN").ok().filter(|s| !s.is_empty());
+
+    let credentials = Credentials::new(
+        access_key,
+        secret_key,
+        session_token,
+        None,
+        "lambda-otel-relay",
+    );
+    let identity = credentials.into();
+
+    let signing_params = v4::SigningParams::builder()
+        .identity(&identity)
+        .region(sigv4.region.as_str())
+        .name(sigv4.service.as_str())
+        .time(SystemTime::now())
+        .settings(SigningSettings::default())
+        .build()
+        .map_err(|e| ExportError::Signing(e.to_string()))?;
+    let signing_params = signing_params.into();
+
+    let signable_request = SignableRequest::new(
+        "POST",
+        url,
+        headers.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+        SignableBody::Bytes(body),
+    )
+    .map_err(|e| ExportError::Signing(e.to_string()))?;
+
+    let (instructions, _signature) = sign(signable_request, &signing_params)
+        .map_err(|e| ExportError::Signing(e.to_string()))?
+        .into_parts();
+
+    Ok(instructions
+        .headers()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect())
 }
 
 /// Gzip-compress pre-encoded protobuf bytes.

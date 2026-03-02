@@ -40,6 +40,38 @@ pub enum ConfigError {
 
     #[error("LAMBDA_OTEL_RELAY_CLIENT_CERT and LAMBDA_OTEL_RELAY_CLIENT_KEY must both be set")]
     ClientIdentityIncomplete,
+
+    #[error(
+        "LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE is set but AWS credentials are missing \
+             (need AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_SESSION_TOKEN)"
+    )]
+    SigV4MissingCredentials,
+
+    #[error(
+        "LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE is set but no AWS region found \
+             (set LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION, AWS_REGION, or AWS_DEFAULT_REGION)"
+    )]
+    SigV4MissingRegion,
+}
+
+/// Configuration for AWS SigV4 request signing.
+///
+/// Enabled by setting `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE` to the target AWS
+/// service code (e.g. `aps` for Amazon Managed Grafana, `xray` for X-Ray).
+/// You can use [`aws service-quotas list-services`] to find service codes.
+///
+/// [`aws service-quotas list-services`]: https://docs.aws.amazon.com/cli/latest/reference/service-quotas/list-services.html
+///
+/// The signing region is read from `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION`, falling
+/// back to `AWS_REGION` then `AWS_DEFAULT_REGION`.
+///
+/// AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+/// `AWS_SESSION_TOKEN`) must be present at startup and are re-read on each
+/// export to handle Lambda credential rotation.
+#[derive(Debug, Clone)]
+pub struct SigV4Config {
+    pub service: String,
+    pub region: String,
 }
 
 #[derive(Debug)]
@@ -55,12 +87,13 @@ pub struct Config {
     pub tls_ca: Option<Vec<u8>>,
     pub tls_client_cert: Option<Vec<u8>>,
     pub tls_client_key: Option<Vec<u8>>,
+    pub sigv4: Option<SigV4Config>,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         let vars: HashMap<String, String> = env::vars()
-            .filter(|(k, _)| k.starts_with("LAMBDA_OTEL_RELAY_"))
+            .filter(|(k, _)| k.starts_with("LAMBDA_OTEL_RELAY_") || k.starts_with("AWS_"))
             .collect();
         Self::parse(&vars)
     }
@@ -87,6 +120,8 @@ impl Config {
             return Err(ConfigError::ClientIdentityIncomplete);
         }
 
+        let sigv4 = parse_sigv4(vars)?;
+
         Ok(Self {
             endpoint,
             listener_port,
@@ -99,6 +134,7 @@ impl Config {
             tls_ca,
             tls_client_cert,
             tls_client_key,
+            sigv4,
         })
     }
 }
@@ -188,6 +224,35 @@ fn parse_certificate_file(
                 })
         }
     }
+}
+
+fn parse_sigv4(vars: &HashMap<String, String>) -> Result<Option<SigV4Config>, ConfigError> {
+    let service = match vars
+        .get("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE")
+        .filter(|s| !s.is_empty())
+    {
+        Some(s) => s.clone(),
+        None => return Ok(None),
+    };
+
+    let region = vars
+        .get("LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION")
+        .or_else(|| vars.get("AWS_REGION"))
+        .or_else(|| vars.get("AWS_DEFAULT_REGION"))
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .ok_or(ConfigError::SigV4MissingRegion)?;
+
+    let has_key = vars.get("AWS_ACCESS_KEY_ID").is_some_and(|s| !s.is_empty());
+    let has_secret = vars
+        .get("AWS_SECRET_ACCESS_KEY")
+        .is_some_and(|s| !s.is_empty());
+    let has_token = vars.get("AWS_SESSION_TOKEN").is_some_and(|s| !s.is_empty());
+    if !has_key || !has_secret || !has_token {
+        return Err(ConfigError::SigV4MissingCredentials);
+    }
+
+    Ok(Some(SigV4Config { service, region }))
 }
 
 fn parse_headers(vars: &HashMap<String, String>) -> Vec<(String, String)> {

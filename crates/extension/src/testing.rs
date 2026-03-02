@@ -125,5 +125,6 @@ pub async fn dummy_config() -> crate::config::Config {
         tls_ca: None,
         tls_client_cert: None,
         tls_client_key: None,
+        sigv4: None,
     }
 }
