@@ -7,6 +7,7 @@ mod flush_strategy;
 mod merge;
 mod otlp_listener;
 mod proto;
+mod runtime_mode;
 mod telemetry_listener;
 
 #[cfg(test)]
@@ -14,6 +15,7 @@ mod testing;
 
 use event_loop::EventLoop;
 use extensions_api::{ExtensionApiClient, InitError};
+use runtime_mode::RuntimeMode;
 use tracing::error;
 
 /// Exceptional init failure — log and exit.
@@ -53,7 +55,9 @@ async fn main() {
     setup_logging();
     setup_rustls();
 
-    let ext = ExtensionApiClient::register()
+    let mode = RuntimeMode::detect();
+
+    let ext = ExtensionApiClient::register(mode)
         .await
         .unwrap_or_else(|e| fatal("failed to register extension", &e));
 

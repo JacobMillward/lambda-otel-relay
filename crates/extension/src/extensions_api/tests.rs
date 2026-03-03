@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime_mode::RuntimeMode;
 
 #[test]
 fn parse_invoke() {
@@ -42,6 +43,20 @@ fn parse_malformed_json() {
 fn parse_empty_body() {
     let err = parse_event("").unwrap_err();
     assert!(matches!(err, ApiError::Parse(_)));
+}
+
+// -- registration_events tests --
+
+#[test]
+fn registration_events_standard() {
+    let events = super::registration_events(RuntimeMode::Standard);
+    assert_eq!(events, r#"{"events":["INVOKE","SHUTDOWN"]}"#);
+}
+
+#[test]
+fn registration_events_managed_instances() {
+    let events = super::registration_events(RuntimeMode::ManagedInstances);
+    assert_eq!(events, r#"{"events":["SHUTDOWN"]}"#);
 }
 
 // -- InitError / ExitError enum tests --
