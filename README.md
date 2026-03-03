@@ -5,16 +5,13 @@
 - [How it works](#how-it-works)
 - [Configuration Reference](#configuration-reference)
   - [Flush Strategies](#flush-strategies)
-- [Prerequisites](#prerequisites)
-- [Build](#build)
-- [Test](#test)
-- [Vendored Protos](#vendored-protos)
+- [Development](#development)
 
-An AWS Lambda extension that acts as a lifecycle-aware OTLP proxy. It runs as an external extension alongside your Lambda function, accepting OpenTelemetry telemetry (traces, metrics, and logs) over a localhost HTTP endpoint, buffering it in memory, and forwarding it to an external OTLP collector.
+An AWS Lambda extension that acts as a lifecycle-aware OTLP proxy. It runs as an external extension alongside your Lambda function, accepting OpenTelemetry telemetry (traces, metrics, and logs) over a localhost HTTP endpoint, buffering it in memory, and forwarding it to an external OTLP collector. The relay supports gzip compression, custom headers, mTLS, and AWS SigV4 request signing for integration with AWS-native backends like Amazon Managed Grafana or AWS X-Ray.
 
 Because Lambda can freeze or shut down the execution environment at any time, telemetry exported directly from in-process SDKs is often lost. This extension hooks into the [Lambda Extensions API](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html) and the [Lambda Telemetry API](https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html) to track invocation boundaries and uses the shutdown grace period to flush any remaining data before the environment is destroyed.
 
-### How it works
+## How it works
 
 1. Your function's OpenTelemetry SDK exports telemetry to `http://localhost:4318` (the relay's local listener).
 2. The relay buffers incoming OTLP payloads in memory.
@@ -23,8 +20,6 @@ Because Lambda can freeze or shut down the execution environment at any time, te
 
 > [!IMPORTANT]
 > Configure your function's OTel SDK to use `SimpleSpanProcessor` (and the equivalent simple/synchronous exporters for metrics and logs) instead of the default `BatchSpanProcessor`. The batch processor holds spans in an internal buffer and flushes on its own schedule. In Lambda, the execution environment can freeze between invocations, so spans sitting in that buffer may never be exported. `SimpleSpanProcessor` exports each span to the relay immediately. The relay is on localhost so the overhead is negligible, and the relay itself handles all buffering and batched export to the remote collector.
-
-The relay supports gzip compression, custom headers, mTLS, and AWS SigV4 request signing for integration with AWS-native backends like Amazon Managed Grafana or AWS X-Ray.
 
 ## Configuration Reference
 
@@ -83,20 +78,22 @@ Runs a non-blocking background flush every `<ms>` milliseconds. Does not flush a
 
 Designed for long-running invocations (e.g. streaming handlers) where invocation boundaries are infrequent and you want periodic export throughout execution.
 
-## Prerequisites
+## Development
+
+### Prerequisites
 
 - [Rust](https://rustup.rs/) (edition 2024)
 - [cargo-lambda](https://www.cargo-lambda.info/)
 - [just](https://github.com/casey/just)
 - Docker (for integration tests)
 
-## Build
+### Build
 
 ```sh
 just build-extension
 ```
 
-## Test
+### Test
 
 ```sh
 just test              # unit tests
@@ -104,7 +101,7 @@ just integration-test  # builds extension + runs integration tests (requires Doc
 just test-all          # both
 ```
 
-## Vendored Protos
+### Vendored Protos
 
 OTLP `.proto` files are vendored from [opentelemetry-proto](https://github.com/open-telemetry/opentelemetry-proto). The pinned version lives in `proto/.version`.
 
