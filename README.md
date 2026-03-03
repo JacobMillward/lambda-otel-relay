@@ -8,12 +8,12 @@ An alternative to the [AWS Distro for OpenTelemetry (ADOT) Lambda Layer](https:/
 
 Because Lambda can freeze or shut down the execution environment at any time, telemetry exported directly from in-process SDKs is often lost. This extension hooks into the [Lambda Extensions API](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html) and the [Lambda Telemetry API](https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html) to track invocation boundaries and uses the shutdown grace period to flush any remaining data before the environment is destroyed.
 
-- [How it works](#how-it-works)
+- [How to use](#how-it-works)
 - [Configuration Reference](#configuration-reference)
   - [Flush Strategies](#flush-strategies)
 - [Development](#development)
 
-## How it works
+## How to use
 
 1. Your function's OpenTelemetry SDK exports telemetry to `http://localhost:4318` (the relay's local listener).
 2. The relay buffers incoming OTLP payloads in memory.
