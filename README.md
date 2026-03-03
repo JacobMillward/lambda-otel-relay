@@ -2,6 +2,14 @@
 
 [![CI](https://github.com/JacobMillward/lambda-otel-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobMillward/lambda-otel-relay/actions/workflows/ci.yml)
 
+- [How it works](#how-it-works)
+- [Configuration Reference](#configuration-reference)
+  - [Flush Strategies](#flush-strategies)
+- [Prerequisites](#prerequisites)
+- [Build](#build)
+- [Test](#test)
+- [Vendored Protos](#vendored-protos)
+
 An AWS Lambda extension that acts as a lifecycle-aware OTLP proxy. It runs as an external extension alongside your Lambda function, accepting OpenTelemetry telemetry (traces, metrics, and logs) over a localhost HTTP endpoint, buffering it in memory, and forwarding it to an external OTLP collector.
 
 Because Lambda can freeze or shut down the execution environment at any time, telemetry exported directly from in-process SDKs is often lost. This extension hooks into the [Lambda Extensions API](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html) and the [Lambda Telemetry API](https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html) to track invocation boundaries and uses the shutdown grace period to flush any remaining data before the environment is destroyed.
