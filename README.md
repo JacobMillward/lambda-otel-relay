@@ -2,14 +2,16 @@
 
 [![CI](https://github.com/JacobMillward/lambda-otel-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobMillward/lambda-otel-relay/actions/workflows/ci.yml)
 
+A lightweight, fast-starting AWS Lambda extension that acts as a lifecycle-aware OTLP proxy. It runs as an external extension alongside your Lambda function, accepting OpenTelemetry telemetry (traces, metrics, and logs) over a localhost HTTP endpoint, buffering it in memory, and forwarding it to an external OTLP collector. The relay supports gzip compression, custom headers, mTLS, and AWS SigV4 request signing for integration with AWS-native backends like Amazon Managed Grafana or AWS X-Ray.
+
+An alternative to the [AWS Distro for OpenTelemetry (ADOT) Lambda Layer](https://aws-otel.github.io/docs/getting-started/lambda), built in Rust with minimal memory overhead and near-zero cold start impact. Where the ADOT collector runs a full OpenTelemetry Collector as a Lambda extension, this relay does one thing: accept OTLP on localhost and forward it to your collector, with lifecycle-aware buffering to avoid data loss.
+
+Because Lambda can freeze or shut down the execution environment at any time, telemetry exported directly from in-process SDKs is often lost. This extension hooks into the [Lambda Extensions API](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html) and the [Lambda Telemetry API](https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html) to track invocation boundaries and uses the shutdown grace period to flush any remaining data before the environment is destroyed.
+
 - [How it works](#how-it-works)
 - [Configuration Reference](#configuration-reference)
   - [Flush Strategies](#flush-strategies)
 - [Development](#development)
-
-An AWS Lambda extension that acts as a lifecycle-aware OTLP proxy. It runs as an external extension alongside your Lambda function, accepting OpenTelemetry telemetry (traces, metrics, and logs) over a localhost HTTP endpoint, buffering it in memory, and forwarding it to an external OTLP collector. The relay supports gzip compression, custom headers, mTLS, and AWS SigV4 request signing for integration with AWS-native backends like Amazon Managed Grafana or AWS X-Ray.
-
-Because Lambda can freeze or shut down the execution environment at any time, telemetry exported directly from in-process SDKs is often lost. This extension hooks into the [Lambda Extensions API](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html) and the [Lambda Telemetry API](https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html) to track invocation boundaries and uses the shutdown grace period to flush any remaining data before the environment is destroyed.
 
 ## How it works
 
