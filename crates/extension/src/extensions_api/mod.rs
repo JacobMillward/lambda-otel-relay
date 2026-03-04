@@ -196,7 +196,7 @@ impl ExtensionsApi for ExtensionApiClient {
     /// Subscribe to the Lambda Telemetry API to receive platform lifecycle events.
     /// Must be called after the telemetry listener is bound and accepting connections.
     async fn register_telemetry(&self, port: u16) -> Result<(), ApiError> {
-        let url = format!("http://{}/2022-08-01/telemetry", self.runtime_api);
+        let url = format!("http://{}/2022-07-01/telemetry", self.runtime_api);
         let body = format!(
             r#"{{"schemaVersion":"2022-07-01","types":["platform"],"buffering":{{"timeoutMs":25,"maxBytes":262144,"maxItems":1000}},"destination":{{"protocol":"HTTP","URI":"http://sandbox:{port}"}}}}"#
         );
