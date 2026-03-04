@@ -62,7 +62,7 @@ async fn main() {
         .unwrap_or_else(|e| fatal("failed to register extension", &e));
 
     // Config parsing moved after registration so errors can be reported
-    let config = match config::Config::from_env() {
+    let config = match config::Config::from_env(mode) {
         Ok(c) => c,
         Err(e) => {
             let err = InitError::from(e);
