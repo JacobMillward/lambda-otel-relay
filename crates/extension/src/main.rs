@@ -56,6 +56,9 @@ async fn main() {
     setup_rustls();
 
     let mode = RuntimeMode::detect();
+    if mode.is_managed_instances() {
+        tracing::info!("Lambda Managed Instances detected, registering for SHUTDOWN only");
+    }
 
     let ext = ExtensionApiClient::register(mode)
         .await
