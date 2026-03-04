@@ -66,9 +66,11 @@ fn rejects_missing_endpoint() {
 
 #[test]
 fn rejects_empty_endpoint() {
-    let err =
-        Config::parse(&vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "")]), RuntimeMode::Standard)
-            .unwrap_err();
+    let err = Config::parse(
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "")]),
+        RuntimeMode::Standard,
+    )
+    .unwrap_err();
     assert!(
         matches!(err, ConfigError::EndpointMissing),
         "should reject empty endpoint"
@@ -107,10 +109,7 @@ fn rejects_non_numeric_port() {
 #[test]
 fn default_export_timeout() {
     let config = Config::parse(
-        &vars(&[(
-            "LAMBDA_OTEL_RELAY_ENDPOINT",
-            "http://localhost:4318",
-        )]),
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")]),
         RuntimeMode::Standard,
     )
     .unwrap();
@@ -146,10 +145,7 @@ fn invalid_export_timeout() {
 #[test]
 fn default_compression_is_gzip() {
     let config = Config::parse(
-        &vars(&[(
-            "LAMBDA_OTEL_RELAY_ENDPOINT",
-            "http://localhost:4318",
-        )]),
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")]),
         RuntimeMode::Standard,
     )
     .unwrap();
@@ -207,10 +203,7 @@ fn parses_export_headers() {
 #[test]
 fn default_buffer_max_bytes() {
     let config = Config::parse(
-        &vars(&[(
-            "LAMBDA_OTEL_RELAY_ENDPOINT",
-            "http://localhost:4318",
-        )]),
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")]),
         RuntimeMode::Standard,
     )
     .unwrap();
@@ -272,10 +265,7 @@ fn empty_headers_returns_empty_vec() {
 #[test]
 fn default_flush_strategy_is_default() {
     let config = Config::parse(
-        &vars(&[(
-            "LAMBDA_OTEL_RELAY_ENDPOINT",
-            "http://localhost:4318",
-        )]),
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")]),
         RuntimeMode::Standard,
     )
     .unwrap();
@@ -372,10 +362,7 @@ fn continuously_flush_strategy() {
 #[test]
 fn certificate_absent_returns_none() {
     let config = Config::parse(
-        &vars(&[(
-            "LAMBDA_OTEL_RELAY_ENDPOINT",
-            "http://localhost:4318",
-        )]),
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")]),
         RuntimeMode::Standard,
     )
     .unwrap();
@@ -490,10 +477,7 @@ fn client_cert_and_key_both_set() {
 #[test]
 fn sigv4_disabled_when_service_not_set() {
     let config = Config::parse(
-        &vars(&[(
-            "LAMBDA_OTEL_RELAY_ENDPOINT",
-            "http://localhost:4318",
-        )]),
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")]),
         RuntimeMode::Standard,
     )
     .unwrap();
