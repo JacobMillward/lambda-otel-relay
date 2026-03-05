@@ -6,6 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 use url::Url;
 
+use crate::buffers::{EnabledSignals, Signal};
 use crate::flush_strategy::{FlushStrategy, FlushStrategyError};
 use crate::runtime_mode::RuntimeMode;
 
@@ -53,6 +54,14 @@ pub enum ConfigError {
              (set LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION, AWS_REGION, or AWS_DEFAULT_REGION)"
     )]
     SigV4MissingRegion,
+
+    #[error(
+        "LAMBDA_OTEL_RELAY_SIGNALS contains unknown signal: {0} (expected \"traces\", \"metrics\", or \"logs\")"
+    )]
+    InvalidSignal(String),
+
+    #[error("LAMBDA_OTEL_RELAY_SIGNALS must contain at least one signal")]
+    NoSignalsEnabled,
 }
 
 /// Configuration for AWS SigV4 request signing.
@@ -89,6 +98,7 @@ pub struct Config {
     pub tls_client_cert: Option<Vec<u8>>,
     pub tls_client_key: Option<Vec<u8>>,
     pub sigv4: Option<SigV4Config>,
+    pub enabled_signals: EnabledSignals,
 }
 
 impl Config {
@@ -141,6 +151,7 @@ impl Config {
         }
 
         let sigv4 = parse_sigv4(vars)?;
+        let enabled_signals = parse_enabled_signals(vars)?;
 
         Ok(Self {
             endpoint,
@@ -155,6 +166,7 @@ impl Config {
             tls_client_cert,
             tls_client_key,
             sigv4,
+            enabled_signals,
         })
     }
 }
@@ -292,6 +304,34 @@ fn parse_headers(vars: &HashMap<String, String>) -> Vec<(String, String)> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn parse_enabled_signals(vars: &HashMap<String, String>) -> Result<EnabledSignals, ConfigError> {
+    let raw = match vars
+        .get("LAMBDA_OTEL_RELAY_SIGNALS")
+        .filter(|s| !s.is_empty())
+    {
+        Some(s) => s,
+        None => return Ok(EnabledSignals::default()),
+    };
+
+    let mut signals = Vec::new();
+    for token in raw.split(',') {
+        let name = token.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match Signal::from_name(name) {
+            Some(signal) => signals.push(signal),
+            None => return Err(ConfigError::InvalidSignal(name.to_owned())),
+        }
+    }
+
+    if signals.is_empty() {
+        return Err(ConfigError::NoSignalsEnabled);
+    }
+
+    Ok(EnabledSignals::from_signals(signals.into_iter()))
 }
 
 #[cfg(test)]

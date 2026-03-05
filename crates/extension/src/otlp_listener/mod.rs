@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::buffers::Signal;
+use crate::buffers::{EnabledSignals, Signal};
 
 fn response(status: StatusCode) -> Response<Full<Bytes>> {
     Response::builder()
@@ -19,8 +19,11 @@ fn response(status: StatusCode) -> Response<Full<Bytes>> {
         .unwrap()
 }
 
-/// Validate the incoming request: route, method, and body.
-async fn validate<B>(req: Request<B>) -> Result<(Signal, Bytes), (StatusCode, String)>
+/// Validate the incoming request: route, method, enabled signals, and body.
+async fn validate<B>(
+    req: Request<B>,
+    enabled: EnabledSignals,
+) -> Result<(Signal, Bytes), (StatusCode, String)>
 where
     B: hyper::body::Body<Data = Bytes> + Send + 'static,
 {
@@ -39,6 +42,13 @@ where
         } else {
             Err((StatusCode::METHOD_NOT_ALLOWED, format!("{method} {path}")))
         }
+    })
+    .and_then(|signal| {
+        if enabled.is_enabled(signal) {
+            Ok(signal)
+        } else {
+            Err((StatusCode::NOT_FOUND, format!("disabled signal: {path}")))
+        }
     })?;
 
     let body = req.collect().await.map(|c| c.to_bytes()).map_err(|_| {
@@ -54,11 +64,12 @@ where
 async fn handle<B>(
     req: Request<B>,
     tx: mpsc::Sender<(Signal, Bytes)>,
+    enabled: EnabledSignals,
 ) -> Result<Response<Full<Bytes>>, Infallible>
 where
     B: hyper::body::Body<Data = Bytes> + Send + 'static,
 {
-    let (signal, body) = match validate(req).await {
+    let (signal, body) = match validate(req, enabled).await {
         Ok(pair) => pair,
         Err((status, reason)) => {
             tracing::warn!(reason, "otlp request rejected");
@@ -84,6 +95,7 @@ pub async fn serve(
     listener: TcpListener,
     tx: mpsc::Sender<(Signal, Bytes)>,
     cancel: CancellationToken,
+    enabled: EnabledSignals,
 ) {
     loop {
         tokio::select! {
@@ -93,7 +105,7 @@ pub async fn serve(
                 tokio::spawn(async move {
                     let service = service_fn(move |req| {
                         let tx = tx.clone();
-                        handle(req, tx)
+                        handle(req, tx, enabled)
                     });
                     let _ = Builder::new(hyper_util::rt::TokioExecutor::new())
                         .serve_connection(TokioIo::new(stream), service)
