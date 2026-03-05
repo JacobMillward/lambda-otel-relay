@@ -4,6 +4,7 @@ mod event_loop;
 mod exporter;
 mod extensions_api;
 mod flush_strategy;
+mod http_client;
 mod merge;
 mod otlp_listener;
 mod proto;
