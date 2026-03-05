@@ -71,9 +71,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: >
-          gh release create "${{ github.ref_name }}"
-          lambda-otel-relay-arm64.zip
-          lambda-otel-relay-x86_64.zip
-          --generate-notes
-          --title "${{ github.ref_name }}"
+        run: |
+          prerelease_flag=""
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+          gh release create "${{ github.ref_name }}" \
+            lambda-otel-relay-arm64.zip \
+            lambda-otel-relay-x86_64.zip \
+            --generate-notes \
+            --title "${{ github.ref_name }}" \
+            $prerelease_flag

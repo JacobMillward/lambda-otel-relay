@@ -84,8 +84,8 @@ vendor-upgrade tag="":
 release version:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! [[ "{{ version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "Error: '{{ version }}' is not valid semver (expected: X.Y.Z)" >&2
+    if ! [[ "{{ version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.+)?$ ]]; then
+        echo "Error: '{{ version }}' is not valid semver (expected: X.Y.Z or X.Y.Z-pre)" >&2
         exit 1
     fi
     if [[ -n "$(git status --porcelain)" ]]; then

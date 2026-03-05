@@ -12,6 +12,7 @@ Because Lambda can freeze or shut down the execution environment at any time, te
 - [Configuration Reference](#configuration-reference)
   - [Flush Strategies](#flush-strategies)
 - [Development](#development)
+- [Releasing](#releasing)
 
 ## How to use
 
@@ -79,6 +80,15 @@ just test              # unit tests
 just integration-test  # builds extension + runs integration tests (requires Docker)
 just test-all          # both
 ```
+
+### Releasing
+
+```sh
+just release 0.5.0       # stable release
+just release 0.5.0-rc.1  # pre-release
+```
+
+This validates the version, bumps `crates/extension/Cargo.toml`, commits, tags `v<version>`, and prompts to push. Pushing the tag triggers a GitHub Actions workflow that cross-compiles Lambda layer zips for arm64 and x86_64 and publishes them as a GitHub Release. Pre-release versions (anything with a hyphen, e.g. `-rc.1`, `-dev.1`) are marked as pre-releases on GitHub.
 
 ### Vendored Protos
 
