@@ -14,6 +14,7 @@ Lambda can freeze or shut down execution environments at any time. Telemetry sit
 - **~1.4 MB layer, near-zero cold start impact.** Written in Rust.
 - **Accepts OTLP on localhost, buffers, forwards to your collector.** Your SDK exports to `localhost:4318`.
 - **Lifecycle-aware.** Hooks into the [Lambda Extensions API](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html) and [Telemetry API](https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html) to track invocations and flush on shutdown.
+- **HTTP/protobuf and gRPC export.** Choose the protocol your collector speaks.
 - **gzip, custom headers, mTLS, SigV4.** Works with AWS-native backends like Amazon Managed Grafana and AWS X-Ray.
 - **Per-signal control.** Enable or disable traces, metrics, and logs independently.
 
@@ -52,6 +53,7 @@ All configuration is via environment variables on your Lambda function. The rela
 | Variable                                   | Default               | Description                                                                                                                          |
 | ------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `LAMBDA_OTEL_RELAY_ENDPOINT`               | _(required)_          | Base URL of the external OTLP collector (e.g. `https://collector.example.com:4318`). Must be a valid HTTP/HTTPS URL.                 |
+| `LAMBDA_OTEL_RELAY_PROTOCOL`               | `http/protobuf`       | Export protocol. `http/protobuf` or `grpc`.                                                                                          |
 | `LAMBDA_OTEL_RELAY_LISTENER_PORT`          | `4318`                | Port for the local OTLP listener on `localhost`. Your function's SDK exports to this port.                                           |
 | `LAMBDA_OTEL_RELAY_TELEMETRY_PORT`         | `4319`                | Port for the Lambda Telemetry API listener. Used internally to receive lifecycle events.                                             |
 | `LAMBDA_OTEL_RELAY_EXPORT_TIMEOUT_MS`      | `5000`                | Timeout in milliseconds for each outbound export request.                                                                            |

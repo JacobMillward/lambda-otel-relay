@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::time::Duration;
 
 use bytes::Bytes;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
@@ -37,6 +37,7 @@ pub struct HttpClient {
 
 pub struct HttpResponse {
     pub status: hyper::StatusCode,
+    pub trailers: Option<hyper::HeaderMap>,
 }
 
 impl HttpClient {
@@ -94,7 +95,7 @@ impl HttpClient {
         &self,
         url: &str,
         headers: &[(String, String)],
-        body: Vec<u8>,
+        body: impl Into<Bytes>,
     ) -> Result<HttpResponse, ClientError> {
         let mut builder = hyper::Request::builder()
             .method(hyper::Method::POST)
@@ -105,7 +106,7 @@ impl HttpClient {
         }
 
         let request = builder
-            .body(Full::new(Bytes::from(body)))
+            .body(Full::new(body.into()))
             .map_err(|e| ClientError::Http(e.to_string()))?;
 
         let resp = tokio::time::timeout(self.timeout, self.client.request(request))
@@ -115,6 +116,14 @@ impl HttpClient {
 
         let status = resp.status();
 
-        Ok(HttpResponse { status })
+        // Collect the body to access HTTP/2 trailers (needed for gRPC status).
+        let collected = resp
+            .into_body()
+            .collect()
+            .await
+            .map_err(|e| ClientError::Http(e.to_string()))?;
+        let trailers = collected.trailers().cloned();
+
+        Ok(HttpResponse { status, trailers })
     }
 }
