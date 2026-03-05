@@ -75,7 +75,7 @@ impl GrpcExporter {
             Compression::None => grpc_codec::encode_frame(false, protobuf)?,
         };
 
-        let resp = self.0.send(&url, headers, body.to_vec()).await?;
+        let resp = self.0.send(&url, headers, body).await?;
 
         if !resp.status.is_success() {
             return Err(ExportError::Rejected {

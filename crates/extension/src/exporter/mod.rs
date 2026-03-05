@@ -110,14 +110,14 @@ impl CommonExporter {
         &self,
         url: &Url,
         mut headers: Vec<(String, String)>,
-        body: Vec<u8>,
+        body: impl AsRef<[u8]> + Into<bytes::Bytes>,
     ) -> Result<crate::http_client::HttpResponse, ExportError> {
         for (k, v) in &self.headers {
             headers.push((k.clone(), v.clone()));
         }
 
         if let Some(sigv4) = &self.sigv4 {
-            let signing_headers = sign_request(sigv4, url.as_str(), &headers, &body)?;
+            let signing_headers = sign_request(sigv4, url.as_str(), &headers, body.as_ref())?;
             headers.extend(signing_headers);
         }
 

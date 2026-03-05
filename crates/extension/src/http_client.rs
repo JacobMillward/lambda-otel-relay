@@ -95,7 +95,7 @@ impl HttpClient {
         &self,
         url: &str,
         headers: &[(String, String)],
-        body: Vec<u8>,
+        body: impl Into<Bytes>,
     ) -> Result<HttpResponse, ClientError> {
         let mut builder = hyper::Request::builder()
             .method(hyper::Method::POST)
@@ -106,7 +106,7 @@ impl HttpClient {
         }
 
         let request = builder
-            .body(Full::new(Bytes::from(body)))
+            .body(Full::new(body.into()))
             .map_err(|e| ClientError::Http(e.to_string()))?;
 
         let resp = tokio::time::timeout(self.timeout, self.client.request(request))
