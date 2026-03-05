@@ -1,20 +1,36 @@
 # lambda-otel-relay
 
+A lightweight, lifecycle-aware OTLP proxy for AWS Lambda.
+
+![GitHub Release](https://img.shields.io/github/v/release/JacobMillward/lambda-otel-relay)
 [![CI](https://github.com/JacobMillward/lambda-otel-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobMillward/lambda-otel-relay/actions/workflows/ci.yml)
 
-A lightweight, fast-starting AWS Lambda extension that acts as a lifecycle-aware OTLP proxy. It runs as an external extension alongside your Lambda function, accepting OpenTelemetry telemetry (traces, metrics, and logs) over a localhost HTTP endpoint, buffering it in memory, and forwarding it to an external OTLP collector. The relay supports gzip compression, custom headers, mTLS, and AWS SigV4 request signing for integration with AWS-native backends like Amazon Managed Grafana or AWS X-Ray.
+## The problem
 
-An alternative to the [AWS Distro for OpenTelemetry (ADOT) Lambda Layer](https://aws-otel.github.io/docs/getting-started/lambda), built in Rust with minimal memory overhead and near-zero cold start impact. Where the ADOT collector runs a full OpenTelemetry Collector as a Lambda extension, this relay does one thing: accept OTLP on localhost and forward it to your collector, with lifecycle-aware buffering to avoid data loss.
+Lambda can freeze or shut down execution environments at any time. Telemetry sitting in batch processor buffers is silently lost.
 
-Because Lambda can freeze or shut down the execution environment at any time, telemetry exported directly from in-process SDKs is often lost. This extension hooks into the [Lambda Extensions API](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html) and the [Lambda Telemetry API](https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html) to track invocation boundaries and uses the shutdown grace period to flush any remaining data before the environment is destroyed.
+## What this does
 
-- [How to use](#how-it-works)
-- [Configuration Reference](#configuration-reference)
-  - [Flush Strategies](#flush-strategies)
-- [Development](#development)
-- [Releasing](#releasing)
+- **~1.4 MB layer, near-zero cold start impact.** Written in Rust.
+- **Accepts OTLP on localhost, buffers, forwards to your collector.** Your SDK exports to `localhost:4318`.
+- **Lifecycle-aware.** Hooks into the [Lambda Extensions API](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html) and [Telemetry API](https://docs.aws.amazon.com/lambda/latest/dg/telemetry-api.html) to track invocations and flush on shutdown.
+- **gzip, custom headers, mTLS, SigV4.** Works with AWS-native backends like Amazon Managed Grafana and AWS X-Ray.
+- **Per-signal control.** Enable or disable traces, metrics, and logs independently.
 
-## How to use
+## vs ADOT
+
+The [AWS Distro for OpenTelemetry (ADOT) Lambda Layer](https://aws-otel.github.io/docs/getting-started/lambda) runs a full OpenTelemetry Collector as a Lambda extension. It supports receivers, processors, exporters, and pipelines. It's also large and adds cold start latency.
+
+This relay is smaller and starts faster. Use ADOT if you need collector-level processing (sampling, tail-based routing, attribute mutation). This relay is for getting telemetry out of Lambda reliably.
+
+## Quick start
+
+1. Download the layer zip for your architecture from the [latest release](https://github.com/JacobMillward/lambda-otel-relay/releases).
+2. Add it to your Lambda function as a layer.
+3. Set the `LAMBDA_OTEL_RELAY_ENDPOINT` environment variable to your collector URL (e.g. `https://collector.example.com:4318`).
+4. Configure your OTel SDK to export to `http://localhost:4318`.
+
+## How it works
 
 1. Your function's OpenTelemetry SDK exports telemetry to `http://localhost:4318` (the relay's local listener).
 2. The relay buffers incoming OTLP payloads in memory.
@@ -24,27 +40,32 @@ Because Lambda can freeze or shut down the execution environment at any time, te
 > [!IMPORTANT]
 > Configure your function's OTel SDK to use `SimpleSpanProcessor` (and the equivalent simple/synchronous exporters for metrics and logs) instead of the default `BatchSpanProcessor`. The batch processor holds spans in an internal buffer and flushes on its own schedule. In Lambda, the execution environment can freeze between invocations, so spans sitting in that buffer may never be exported. `SimpleSpanProcessor` exports each span to the relay immediately. The relay is on localhost so the overhead is negligible, and the relay itself handles all buffering and batched export to the remote collector.
 
+- [Configuration Reference](#configuration-reference)
+  - [Flush Strategies](#flush-strategies)
+- [Development](#development)
+- [Releasing](#releasing)
+
 ## Configuration Reference
 
 All configuration is via environment variables on your Lambda function. The relay reads these at startup.
 
-| Variable                                   | Default           | Description                                                                                                                          |
-| ------------------------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `LAMBDA_OTEL_RELAY_ENDPOINT`               | _(required)_      | Base URL of the external OTLP collector (e.g. `https://collector.example.com:4318`). Must be a valid HTTP/HTTPS URL.                 |
-| `LAMBDA_OTEL_RELAY_LISTENER_PORT`          | `4318`            | Port for the local OTLP listener on `localhost`. Your function's SDK exports to this port.                                           |
-| `LAMBDA_OTEL_RELAY_TELEMETRY_PORT`         | `4319`            | Port for the Lambda Telemetry API listener. Used internally to receive lifecycle events.                                             |
-| `LAMBDA_OTEL_RELAY_EXPORT_TIMEOUT_MS`      | `5000`            | Timeout in milliseconds for each outbound export request.                                                                            |
-| `LAMBDA_OTEL_RELAY_COMPRESSION`            | `gzip`            | Compression for outbound requests. `gzip` or `none`.                                                                                 |
-| `LAMBDA_OTEL_RELAY_EXPORT_HEADERS`         | _(none)_          | Custom headers for outbound requests. Comma-separated `key=value` pairs (e.g. `Authorization=Bearer token,X-Org-Id=12345`).          |
-| `LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES`       | `4194304` (4 MiB) | Maximum buffer size in bytes before triggering a background flush. `0` to disable.                                                   |
-| `LAMBDA_OTEL_RELAY_FLUSH_STRATEGY`         | `default`         | When to forward buffered telemetry. See [Flush Strategies](#flush-strategies).                                                       |
-| `LAMBDA_OTEL_RELAY_CERTIFICATE`            | _(none)_          | Path to a custom CA certificate (PEM) for verifying the collector's TLS certificate.                                                 |
-| `LAMBDA_OTEL_RELAY_CLIENT_CERT`            | _(none)_          | Path to a client certificate (PEM) for mTLS. Must be set together with `CLIENT_KEY`.                                                 |
-| `LAMBDA_OTEL_RELAY_CLIENT_KEY`             | _(none)_          | Path to a client private key (PEM) for mTLS. Must be set together with `CLIENT_CERT`.                                                |
-| `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE` | _(none)_          | AWS service code to sign requests for (e.g. `aps`, `xray`). Enables SigV4 signing. Requires AWS credentials from the Lambda runtime. |
-| `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION`  | _(none)_          | AWS region for SigV4 signing. Falls back to `AWS_REGION`, then `AWS_DEFAULT_REGION`.                                                 |
-| `LAMBDA_OTEL_RELAY_SIGNALS`                | `traces,metrics,logs` | Comma-separated list of signal types to accept and forward. Disabled signals return 404. At least one required.                  |
-| `LAMBDA_OTEL_RELAY_LOG_LEVEL`              | `WARN`            | Log level for the extension. `DEBUG`, `INFO`, `WARN`, or `ERROR`.                                                                    |
+| Variable                                   | Default               | Description                                                                                                                          |
+| ------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `LAMBDA_OTEL_RELAY_ENDPOINT`               | _(required)_          | Base URL of the external OTLP collector (e.g. `https://collector.example.com:4318`). Must be a valid HTTP/HTTPS URL.                 |
+| `LAMBDA_OTEL_RELAY_LISTENER_PORT`          | `4318`                | Port for the local OTLP listener on `localhost`. Your function's SDK exports to this port.                                           |
+| `LAMBDA_OTEL_RELAY_TELEMETRY_PORT`         | `4319`                | Port for the Lambda Telemetry API listener. Used internally to receive lifecycle events.                                             |
+| `LAMBDA_OTEL_RELAY_EXPORT_TIMEOUT_MS`      | `5000`                | Timeout in milliseconds for each outbound export request.                                                                            |
+| `LAMBDA_OTEL_RELAY_COMPRESSION`            | `gzip`                | Compression for outbound requests. `gzip` or `none`.                                                                                 |
+| `LAMBDA_OTEL_RELAY_EXPORT_HEADERS`         | _(none)_              | Custom headers for outbound requests. Comma-separated `key=value` pairs (e.g. `Authorization=Bearer token,X-Org-Id=12345`).          |
+| `LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES`       | `4194304` (4 MiB)     | Maximum buffer size in bytes before triggering a background flush. `0` to disable.                                                   |
+| `LAMBDA_OTEL_RELAY_FLUSH_STRATEGY`         | `default`             | When to forward buffered telemetry. See [Flush Strategies](#flush-strategies).                                                       |
+| `LAMBDA_OTEL_RELAY_CERTIFICATE`            | _(none)_              | Path to a custom CA certificate (PEM) for verifying the collector's TLS certificate.                                                 |
+| `LAMBDA_OTEL_RELAY_CLIENT_CERT`            | _(none)_              | Path to a client certificate (PEM) for mTLS. Must be set together with `CLIENT_KEY`.                                                 |
+| `LAMBDA_OTEL_RELAY_CLIENT_KEY`             | _(none)_              | Path to a client private key (PEM) for mTLS. Must be set together with `CLIENT_CERT`.                                                |
+| `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE` | _(none)_              | AWS service code to sign requests for (e.g. `aps`, `xray`). Enables SigV4 signing. Requires AWS credentials from the Lambda runtime. |
+| `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION`  | _(none)_              | AWS region for SigV4 signing. Falls back to `AWS_REGION`, then `AWS_DEFAULT_REGION`.                                                 |
+| `LAMBDA_OTEL_RELAY_SIGNALS`                | `traces,metrics,logs` | Comma-separated list of signal types to accept and forward. Disabled signals return 404. At least one required.                      |
+| `LAMBDA_OTEL_RELAY_LOG_LEVEL`              | `WARN`                | Log level for the extension. `DEBUG`, `INFO`, `WARN`, or `ERROR`.                                                                    |
 
 ### Flush Strategies
 
