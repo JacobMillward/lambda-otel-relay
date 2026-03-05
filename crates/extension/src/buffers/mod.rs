@@ -11,11 +11,49 @@ use tracing::{error, warn};
 
 use crate::exporter::Exporter;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     Traces,
     Metrics,
     Logs,
+}
+
+impl Signal {
+    const fn bit(self) -> u8 {
+        1 << (self as u8)
+    }
+
+    pub fn from_name(name: &str) -> Option<Signal> {
+        match name.to_ascii_lowercase().as_str() {
+            "traces" => Some(Signal::Traces),
+            "metrics" => Some(Signal::Metrics),
+            "logs" => Some(Signal::Logs),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnabledSignals(u8);
+
+impl EnabledSignals {
+    pub fn all() -> Self {
+        Self(Signal::Traces.bit() | Signal::Metrics.bit() | Signal::Logs.bit())
+    }
+
+    pub fn is_enabled(self, signal: Signal) -> bool {
+        self.0 & signal.bit() != 0
+    }
+
+    pub fn from_signals(signals: impl Iterator<Item = Signal>) -> Self {
+        Self(signals.fold(0u8, |acc, s| acc | s.bit()))
+    }
+}
+
+impl Default for EnabledSignals {
+    fn default() -> Self {
+        Self::all()
+    }
 }
 
 #[derive(Default)]

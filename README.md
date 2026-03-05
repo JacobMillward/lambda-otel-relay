@@ -42,6 +42,7 @@ All configuration is via environment variables on your Lambda function. The rela
 | `LAMBDA_OTEL_RELAY_CLIENT_KEY`             | _(none)_          | Path to a client private key (PEM) for mTLS. Must be set together with `CLIENT_CERT`.                                                |
 | `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_SERVICE` | _(none)_          | AWS service code to sign requests for (e.g. `aps`, `xray`). Enables SigV4 signing. Requires AWS credentials from the Lambda runtime. |
 | `LAMBDA_OTEL_RELAY_ENDPOINT_SIGV4_REGION`  | _(none)_          | AWS region for SigV4 signing. Falls back to `AWS_REGION`, then `AWS_DEFAULT_REGION`.                                                 |
+| `LAMBDA_OTEL_RELAY_SIGNALS`                | `traces,metrics,logs` | Comma-separated list of signal types to accept and forward. Disabled signals return 404. At least one required.                  |
 | `LAMBDA_OTEL_RELAY_LOG_LEVEL`              | `WARN`            | Log level for the extension. `DEBUG`, `INFO`, `WARN`, or `ERROR`.                                                                    |
 
 ### Flush Strategies

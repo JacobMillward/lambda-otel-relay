@@ -56,7 +56,12 @@ impl<'a, A: ExtensionsApi, E: Exporter> EventLoop<'a, A, E> {
             .map_err(|e| ApiError::InitFailed(format!("failed to bind telemetry listener: {e}")))?;
         api.register_telemetry(config.telemetry_port).await?;
 
-        let otlp_task = tokio::spawn(otlp_listener::serve(otlp_listener, otlp_tx, cancel.clone()));
+        let otlp_task = tokio::spawn(otlp_listener::serve(
+            otlp_listener,
+            otlp_tx,
+            cancel.clone(),
+            config.enabled_signals,
+        ));
         let telemetry_task = tokio::spawn(telemetry_listener::serve(
             telemetry_listener,
             telemetry_tx,

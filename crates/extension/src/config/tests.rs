@@ -3,6 +3,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use super::*;
+use crate::buffers::{EnabledSignals, Signal};
 use crate::runtime_mode::RuntimeMode;
 
 fn vars(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -676,4 +677,111 @@ fn standard_mode_does_not_override_strategy() {
     )
     .unwrap();
     assert!(matches!(config.flush_strategy, FlushStrategy::End));
+}
+
+#[test]
+fn default_enabled_signals_is_all() {
+    let config = Config::parse(
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert_eq!(config.enabled_signals, EnabledSignals::all());
+}
+
+#[test]
+fn enabled_signals_subset() {
+    let config = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_SIGNALS", "traces,logs"),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert!(config.enabled_signals.is_enabled(Signal::Traces));
+    assert!(!config.enabled_signals.is_enabled(Signal::Metrics));
+    assert!(config.enabled_signals.is_enabled(Signal::Logs));
+}
+
+#[test]
+fn enabled_signals_single() {
+    let config = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_SIGNALS", "metrics"),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert!(!config.enabled_signals.is_enabled(Signal::Traces));
+    assert!(config.enabled_signals.is_enabled(Signal::Metrics));
+    assert!(!config.enabled_signals.is_enabled(Signal::Logs));
+}
+
+#[test]
+fn enabled_signals_unknown_errors() {
+    let err = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_SIGNALS", "traces,spans"),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::InvalidSignal(ref s) if s == "spans"));
+}
+
+#[test]
+fn enabled_signals_case_insensitive() {
+    let config = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_SIGNALS", "Traces,METRICS,Logs"),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert_eq!(config.enabled_signals, EnabledSignals::all());
+}
+
+#[test]
+fn enabled_signals_whitespace_tolerance() {
+    let config = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_SIGNALS", " traces , logs "),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert!(config.enabled_signals.is_enabled(Signal::Traces));
+    assert!(!config.enabled_signals.is_enabled(Signal::Metrics));
+    assert!(config.enabled_signals.is_enabled(Signal::Logs));
+}
+
+#[test]
+fn enabled_signals_empty_string_defaults_to_all() {
+    let config = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_SIGNALS", ""),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert_eq!(config.enabled_signals, EnabledSignals::all());
+}
+
+#[test]
+fn enabled_signals_only_commas_errors() {
+    let err = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_SIGNALS", ",,,"),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::NoSignalsEnabled));
 }

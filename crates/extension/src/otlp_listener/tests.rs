@@ -24,9 +24,13 @@ fn get(path: &str) -> Request<Full<Bytes>> {
 #[tokio::test]
 async fn routes_traces_payload_to_channel() {
     let (tx, mut rx) = mpsc::channel(8);
-    let resp = handle(post("/v1/traces", b"trace-payload"), tx)
-        .await
-        .unwrap();
+    let resp = handle(
+        post("/v1/traces", b"trace-payload"),
+        tx,
+        EnabledSignals::all(),
+    )
+    .await
+    .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let (signal, body) = rx.recv().await.unwrap();
     assert!(matches!(signal, Signal::Traces));
@@ -36,9 +40,13 @@ async fn routes_traces_payload_to_channel() {
 #[tokio::test]
 async fn routes_metrics_payload_to_channel() {
     let (tx, mut rx) = mpsc::channel(8);
-    let resp = handle(post("/v1/metrics", b"metric-payload"), tx)
-        .await
-        .unwrap();
+    let resp = handle(
+        post("/v1/metrics", b"metric-payload"),
+        tx,
+        EnabledSignals::all(),
+    )
+    .await
+    .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let (signal, body) = rx.recv().await.unwrap();
     assert!(matches!(signal, Signal::Metrics));
@@ -48,7 +56,9 @@ async fn routes_metrics_payload_to_channel() {
 #[tokio::test]
 async fn routes_logs_payload_to_channel() {
     let (tx, mut rx) = mpsc::channel(8);
-    let resp = handle(post("/v1/logs", b"log-payload"), tx).await.unwrap();
+    let resp = handle(post("/v1/logs", b"log-payload"), tx, EnabledSignals::all())
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let (signal, body) = rx.recv().await.unwrap();
     assert!(matches!(signal, Signal::Logs));
@@ -58,14 +68,18 @@ async fn routes_logs_payload_to_channel() {
 #[tokio::test]
 async fn rejects_unknown_path_with_404() {
     let (tx, _rx) = mpsc::channel(8);
-    let resp = handle(post("/v1/unknown", b""), tx).await.unwrap();
+    let resp = handle(post("/v1/unknown", b""), tx, EnabledSignals::all())
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn rejects_non_post_with_405() {
     let (tx, _rx) = mpsc::channel(8);
-    let resp = handle(get("/v1/traces"), tx).await.unwrap();
+    let resp = handle(get("/v1/traces"), tx, EnabledSignals::all())
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
@@ -73,7 +87,9 @@ async fn rejects_non_post_with_405() {
 async fn returns_503_with_retry_when_channel_full() {
     let (tx, _rx) = mpsc::channel(1);
     tx.try_send((Signal::Traces, Bytes::new())).unwrap();
-    let resp = handle(post("/v1/traces", b"overflow"), tx).await.unwrap();
+    let resp = handle(post("/v1/traces", b"overflow"), tx, EnabledSignals::all())
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(resp.headers()["Retry-After"], "1");
 }
@@ -82,7 +98,9 @@ async fn returns_503_with_retry_when_channel_full() {
 async fn returns_502_when_channel_closed() {
     let (tx, rx) = mpsc::channel(8);
     drop(rx);
-    let resp = handle(post("/v1/traces", b"orphan"), tx).await.unwrap();
+    let resp = handle(post("/v1/traces", b"orphan"), tx, EnabledSignals::all())
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
     assert!(resp.headers().get("Retry-After").is_none());
 }
@@ -110,6 +128,36 @@ async fn returns_400_when_body_read_fails() {
         .uri("/v1/traces")
         .body(FailBody)
         .unwrap();
-    let resp = handle(req, tx).await.unwrap();
+    let resp = handle(req, tx, EnabledSignals::all()).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn disabled_signal_returns_404() {
+    let traces_only = EnabledSignals::from_signals([Signal::Traces].into_iter());
+    let (tx, _rx) = mpsc::channel(8);
+
+    let resp = handle(post("/v1/metrics", b"payload"), tx.clone(), traces_only)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    let resp = handle(post("/v1/logs", b"payload"), tx, traces_only)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn enabled_signal_routes_normally_when_others_disabled() {
+    let traces_only = EnabledSignals::from_signals([Signal::Traces].into_iter());
+    let (tx, mut rx) = mpsc::channel(8);
+
+    let resp = handle(post("/v1/traces", b"trace-data"), tx, traces_only)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let (signal, body) = rx.recv().await.unwrap();
+    assert!(matches!(signal, Signal::Traces));
+    assert_eq!(body.as_ref(), b"trace-data");
 }
