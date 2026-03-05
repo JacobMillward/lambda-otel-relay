@@ -8,6 +8,7 @@ use thiserror::Error;
 
 use crate::config::ConfigError;
 use crate::exporter::ExporterError;
+use crate::runtime_mode::RuntimeMode;
 
 const EXTENSION_NAME: &str = "lambda-otel-relay";
 
@@ -105,6 +106,13 @@ pub enum ExtensionsApiEvent {
     Shutdown { reason: String },
 }
 
+fn registration_events(mode: RuntimeMode) -> &'static str {
+    match mode {
+        RuntimeMode::Standard => r#"{"events":["INVOKE","SHUTDOWN"]}"#,
+        RuntimeMode::ManagedInstances => r#"{"events":["SHUTDOWN"]}"#,
+    }
+}
+
 #[derive(Debug)]
 pub struct ExtensionApiClient {
     client: reqwest::Client,
@@ -115,7 +123,7 @@ pub struct ExtensionApiClient {
 impl ExtensionApiClient {
     /// Read `AWS_LAMBDA_RUNTIME_API` from the environment and register the
     /// extension with the Lambda Extensions API.
-    pub async fn register() -> Result<Self, ApiError> {
+    pub async fn register(mode: RuntimeMode) -> Result<Self, ApiError> {
         let runtime_api =
             std::env::var("AWS_LAMBDA_RUNTIME_API").map_err(|_| ApiError::MissingRuntimeApi)?;
         let client = reqwest::Client::new();
@@ -124,7 +132,7 @@ impl ExtensionApiClient {
         let resp = client
             .post(format!("{extensions_url}/register"))
             .header("Lambda-Extension-Name", EXTENSION_NAME)
-            .body(r#"{"events":["INVOKE","SHUTDOWN"]}"#)
+            .body(registration_events(mode))
             .send()
             .await?;
 

@@ -7,6 +7,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::flush_strategy::{FlushStrategy, FlushStrategyError};
+use crate::runtime_mode::RuntimeMode;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Compression {
@@ -91,14 +92,14 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_env() -> Result<Self, ConfigError> {
+    pub fn from_env(mode: RuntimeMode) -> Result<Self, ConfigError> {
         let vars: HashMap<String, String> = env::vars()
             .filter(|(k, _)| k.starts_with("LAMBDA_OTEL_RELAY_") || k.starts_with("AWS_"))
             .collect();
-        Self::parse(&vars)
+        Self::parse(&vars, mode)
     }
 
-    fn parse(vars: &HashMap<String, String>) -> Result<Self, ConfigError> {
+    fn parse(vars: &HashMap<String, String>, mode: RuntimeMode) -> Result<Self, ConfigError> {
         let endpoint = parse_endpoint(vars)?;
         let listener_port = parse_port(vars, "LAMBDA_OTEL_RELAY_LISTENER_PORT", 4318)?;
         let telemetry_port = parse_port(vars, "LAMBDA_OTEL_RELAY_TELEMETRY_PORT", 4319)?;
@@ -106,11 +107,30 @@ impl Config {
         let compression = parse_compression(vars)?;
         let export_headers = parse_headers(vars);
         let buffer_max_bytes = parse_buffer_max_bytes(vars, "LAMBDA_OTEL_RELAY_BUFFER_MAX_BYTES")?;
-        let flush_strategy = vars
+        let raw_strategy = vars
             .get("LAMBDA_OTEL_RELAY_FLUSH_STRATEGY")
             .map(|s| s.as_str())
-            .unwrap_or("")
-            .parse()?;
+            .unwrap_or("");
+        let flush_strategy: FlushStrategy = raw_strategy.parse()?;
+        let flush_strategy = if mode.is_managed_instances() {
+            match flush_strategy {
+                FlushStrategy::Continuously { .. } => flush_strategy,
+                other => {
+                    if !raw_strategy.is_empty() {
+                        tracing::warn!(
+                            strategy = %other,
+                            "flush strategy {other} uses invocation boundaries which are \
+                             unavailable on Lambda Managed Instances; overriding to continuously,60000"
+                        );
+                    }
+                    FlushStrategy::Continuously {
+                        interval: Duration::from_secs(60),
+                    }
+                }
+            }
+        } else {
+            flush_strategy
+        };
 
         let tls_ca = parse_certificate_file(vars, "LAMBDA_OTEL_RELAY_CERTIFICATE")?;
         let tls_client_cert = parse_certificate_file(vars, "LAMBDA_OTEL_RELAY_CLIENT_CERT")?;

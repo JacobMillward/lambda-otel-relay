@@ -7,6 +7,7 @@ mod flush_strategy;
 mod merge;
 mod otlp_listener;
 mod proto;
+mod runtime_mode;
 mod telemetry_listener;
 
 #[cfg(test)]
@@ -14,6 +15,7 @@ mod testing;
 
 use event_loop::EventLoop;
 use extensions_api::{ExtensionApiClient, InitError};
+use runtime_mode::RuntimeMode;
 use tracing::error;
 
 /// Exceptional init failure — log and exit.
@@ -53,12 +55,17 @@ async fn main() {
     setup_logging();
     setup_rustls();
 
-    let ext = ExtensionApiClient::register()
+    let mode = RuntimeMode::detect();
+    if mode.is_managed_instances() {
+        tracing::info!("Lambda Managed Instances detected, registering for SHUTDOWN only");
+    }
+
+    let ext = ExtensionApiClient::register(mode)
         .await
         .unwrap_or_else(|e| fatal("failed to register extension", &e));
 
     // Config parsing moved after registration so errors can be reported
-    let config = match config::Config::from_env() {
+    let config = match config::Config::from_env(mode) {
         Ok(c) => c,
         Err(e) => {
             let err = InitError::from(e);
