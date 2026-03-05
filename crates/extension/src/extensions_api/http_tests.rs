@@ -4,7 +4,7 @@ async fn mock_api_client() -> (ExtensionApiClient, tokio::net::TcpListener) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let client = ExtensionApiClient {
-        client: reqwest::Client::new(),
+        client: Client::builder(TokioExecutor::new()).build_http(),
         runtime_api: format!("127.0.0.1:{port}"),
         ext_id: "test-ext-id".into(),
     };

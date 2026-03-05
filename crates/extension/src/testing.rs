@@ -24,7 +24,7 @@ pub struct FailingExporter;
 impl Exporter for FailingExporter {
     async fn export(&self, _data: &mut BufferData) -> Result<(), ExportError> {
         Err(ExportError::Rejected {
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
         })
     }
 }
@@ -40,7 +40,7 @@ impl Exporter for PartialFailExporter {
         // Logs succeed — clear them
         data.logs.clear();
         Err(ExportError::Rejected {
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
         })
     }
 }
