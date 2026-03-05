@@ -79,3 +79,38 @@ vendor-upgrade tag="":
         echo "Resolved latest: ${latest}"
     fi
     just vendor
+
+# Tag a release: just release 0.5.0
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! [[ "{{ version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "Error: '{{ version }}' is not valid semver (expected: X.Y.Z)" >&2
+        exit 1
+    fi
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Error: working tree is not clean" >&2
+        exit 1
+    fi
+    if [[ "$(git branch --show-current)" != "main" ]]; then
+        echo "Error: not on main branch" >&2
+        exit 1
+    fi
+    tmp=$(mktemp)
+    sed 's/^version = ".*"/version = "{{ version }}"/' crates/extension/Cargo.toml > "$tmp" && mv "$tmp" crates/extension/Cargo.toml
+    cargo generate-lockfile --quiet
+    git add crates/extension/Cargo.toml Cargo.lock
+    git commit -m "Release v{{ version }}"
+    git tag "v{{ version }}"
+    echo ""
+    echo "Created commit and tag v{{ version }}."
+    # Temporarily disable kitty keyboard protocol so read works in all terminals
+    printf '\e[>0u'
+    trap 'printf "\e[<u"' EXIT
+    printf "Push to origin? [y/N] "
+    read -r answer < /dev/tty
+    if [[ "${answer}" =~ ^[Yy]$ ]]; then
+        git push origin main "v{{ version }}"
+    else
+        echo "Push with: git push origin main v{{ version }}"
+    fi
