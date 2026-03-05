@@ -1,4 +1,6 @@
-use std::collections::VecDeque;
+mod grpc;
+mod http_protobuf;
+
 use std::env;
 use std::io::Write;
 use std::time::SystemTime;
@@ -6,16 +8,17 @@ use std::time::SystemTime;
 use aws_credential_types::Credentials;
 use aws_sigv4::http_request::{SignableBody, SignableRequest, SigningSettings, sign};
 use aws_sigv4::sign::v4;
-use bytes::Bytes;
 use flate2::write::GzEncoder;
-use prost::Message;
 use thiserror::Error;
 use url::Url;
 
 use crate::buffers::BufferData;
-use crate::config::{Compression, Config, SigV4Config};
+use crate::config::{Compression, Config, ExportProtocol, SigV4Config};
+use crate::grpc as grpc_codec;
 use crate::http_client::{ClientError, HttpClient};
-use crate::merge;
+
+pub use self::grpc::GrpcExporter;
+pub use self::http_protobuf::HttpProtobufExporter;
 
 #[derive(Debug, Error)]
 pub enum ExportError {
@@ -24,6 +27,9 @@ pub enum ExportError {
 
     #[error("collector rejected payload: {status}")]
     Rejected { status: hyper::StatusCode },
+
+    #[error("gRPC error: {0}")]
+    Grpc(#[from] grpc_codec::GrpcError),
 
     #[error("gzip compression failed: {0}")]
     Compression(#[from] std::io::Error),
@@ -47,12 +53,9 @@ pub trait Exporter: Send + Sync + 'static {
     -> impl Future<Output = Result<(), ExportError>> + Send;
 }
 
-pub struct OtlpExporter {
-    client: HttpClient,
-    endpoint: Url,
-    compression: Compression,
-    headers: Vec<(String, String)>,
-    sigv4: Option<SigV4Config>,
+pub enum OtlpExporter {
+    HttpProtobuf(HttpProtobufExporter),
+    Grpc(GrpcExporter),
 }
 
 impl OtlpExporter {
@@ -64,64 +67,51 @@ impl OtlpExporter {
             config.tls_client_key.as_deref(),
         )?;
 
-        Ok(Self {
+        let common = CommonExporter {
             client,
             endpoint: config.endpoint.clone(),
             compression: config.compression,
             headers: config.export_headers.clone(),
             sigv4: config.sigv4.clone(),
-        })
-    }
-
-    async fn export_traces(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
-        match queue.len() {
-            0 => Ok(()),
-            1 => self.post_bytes("v1/traces", &queue[0]).await,
-            _ => self.post("v1/traces", &merge::merge_traces(queue)).await,
-        }
-    }
-
-    async fn export_metrics(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
-        match queue.len() {
-            0 => Ok(()),
-            1 => self.post_bytes("v1/metrics", &queue[0]).await,
-            _ => self.post("v1/metrics", &merge::merge_metrics(queue)).await,
-        }
-    }
-
-    async fn export_logs(&self, queue: &VecDeque<Bytes>) -> Result<(), ExportError> {
-        match queue.len() {
-            0 => Ok(()),
-            1 => self.post_bytes("v1/logs", &queue[0]).await,
-            _ => self.post("v1/logs", &merge::merge_logs(queue)).await,
-        }
-    }
-
-    /// Send pre-encoded protobuf bytes directly, skipping decode/merge/re-encode.
-    async fn post_bytes(&self, path: &str, protobuf: &[u8]) -> Result<(), ExportError> {
-        self.post_body(path, protobuf).await
-    }
-
-    async fn post(&self, path: &str, msg: &impl Message) -> Result<(), ExportError> {
-        self.post_body(path, &msg.encode_to_vec()).await
-    }
-
-    async fn post_body(&self, path: &str, protobuf: &[u8]) -> Result<(), ExportError> {
-        let url = self.endpoint.join(path).expect("invalid export path");
-
-        let mut headers: Vec<(String, String)> = vec![(
-            "content-type".to_owned(),
-            "application/x-protobuf".to_owned(),
-        )];
-
-        let body = match self.compression {
-            Compression::Gzip => {
-                headers.push(("content-encoding".to_owned(), "gzip".to_owned()));
-                compress_gzip(protobuf)?
-            }
-            Compression::None => protobuf.to_vec(),
         };
 
+        Ok(match config.protocol {
+            ExportProtocol::HttpProtobuf => Self::HttpProtobuf(HttpProtobufExporter(common)),
+            ExportProtocol::Grpc => Self::Grpc(GrpcExporter(common)),
+        })
+    }
+}
+
+impl Exporter for OtlpExporter {
+    async fn export(&self, data: &mut BufferData) -> Result<(), ExportError> {
+        match self {
+            Self::HttpProtobuf(e) => e.export(data).await,
+            Self::Grpc(e) => e.export(data).await,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared state
+// ---------------------------------------------------------------------------
+
+struct CommonExporter {
+    client: HttpClient,
+    endpoint: Url,
+    compression: Compression,
+    headers: Vec<(String, String)>,
+    sigv4: Option<SigV4Config>,
+}
+
+impl CommonExporter {
+    /// Send a request with the given headers and body, applying custom headers
+    /// and SigV4 signing.
+    async fn send(
+        &self,
+        url: &Url,
+        mut headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    ) -> Result<crate::http_client::HttpResponse, ExportError> {
         for (k, v) in &self.headers {
             headers.push((k.clone(), v.clone()));
         }
@@ -131,43 +121,13 @@ impl OtlpExporter {
             headers.extend(signing_headers);
         }
 
-        let resp = self.client.post(url.as_str(), &headers, body).await?;
-
-        if resp.status.is_success() {
-            Ok(())
-        } else {
-            Err(ExportError::Rejected {
-                status: resp.status,
-            })
-        }
+        Ok(self.client.post(url.as_str(), &headers, body).await?)
     }
 }
 
-impl Exporter for OtlpExporter {
-    async fn export(&self, data: &mut BufferData) -> Result<(), ExportError> {
-        if data.is_empty() {
-            return Ok(());
-        }
-
-        let (t, m, l) = tokio::join!(
-            self.export_traces(&data.traces.queue),
-            self.export_metrics(&data.metrics.queue),
-            self.export_logs(&data.logs.queue),
-        );
-
-        if t.is_ok() {
-            data.traces.clear();
-        }
-        if m.is_ok() {
-            data.metrics.clear();
-        }
-        if l.is_ok() {
-            data.logs.clear();
-        }
-
-        t.and(m).and(l)
-    }
-}
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 
 /// Read credentials from the environment and sign the request.
 ///
@@ -240,6 +200,7 @@ mod tests {
     use crate::proto::opentelemetry::proto::collector::trace::v1::ExportTraceServiceRequest;
     use crate::proto::opentelemetry::proto::trace::v1::ResourceSpans;
     use flate2::read::GzDecoder;
+    use prost::Message;
     use std::io::Read;
 
     #[test]
