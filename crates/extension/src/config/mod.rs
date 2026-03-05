@@ -16,6 +16,13 @@ pub enum Compression {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ExportProtocol {
+    #[default]
+    HttpProtobuf,
+    Grpc,
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("LAMBDA_OTEL_RELAY_ENDPOINT is required but not set")]
@@ -62,6 +69,11 @@ pub enum ConfigError {
 
     #[error("LAMBDA_OTEL_RELAY_SIGNALS must contain at least one signal")]
     NoSignalsEnabled,
+
+    #[error(
+        "LAMBDA_OTEL_RELAY_PROTOCOL has invalid value: {0} (expected \"http/protobuf\" or \"grpc\")"
+    )]
+    InvalidProtocol(String),
 }
 
 /// Configuration for AWS SigV4 request signing.
@@ -99,6 +111,7 @@ pub struct Config {
     pub tls_client_key: Option<Vec<u8>>,
     pub sigv4: Option<SigV4Config>,
     pub enabled_signals: EnabledSignals,
+    pub protocol: ExportProtocol,
 }
 
 impl Config {
@@ -152,6 +165,7 @@ impl Config {
 
         let sigv4 = parse_sigv4(vars)?;
         let enabled_signals = parse_enabled_signals(vars)?;
+        let protocol = parse_protocol(vars)?;
 
         Ok(Self {
             endpoint,
@@ -167,6 +181,7 @@ impl Config {
             tls_client_key,
             sigv4,
             enabled_signals,
+            protocol,
         })
     }
 }
@@ -332,6 +347,14 @@ fn parse_enabled_signals(vars: &HashMap<String, String>) -> Result<EnabledSignal
     }
 
     Ok(EnabledSignals::from_signals(signals.into_iter()))
+}
+
+fn parse_protocol(vars: &HashMap<String, String>) -> Result<ExportProtocol, ConfigError> {
+    match vars.get("LAMBDA_OTEL_RELAY_PROTOCOL").map(|s| s.as_str()) {
+        Some("http/protobuf") | None => Ok(ExportProtocol::HttpProtobuf),
+        Some("grpc") => Ok(ExportProtocol::Grpc),
+        Some(other) => Err(ConfigError::InvalidProtocol(other.to_owned())),
+    }
 }
 
 #[cfg(test)]
