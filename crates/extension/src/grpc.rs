@@ -9,19 +9,28 @@ pub const LOGS_PATH: &str = "/opentelemetry.proto.collector.logs.v1.LogsService/
 /// Encode a protobuf payload into a gRPC length-prefixed message.
 ///
 /// Wire format: `[compressed:u8][length:u32 big-endian][payload]`
-pub fn encode_frame(compressed: bool, payload: &[u8]) -> Bytes {
+///
+/// Returns an error if the payload exceeds the gRPC maximum message size
+/// (2^32 - 1 bytes ≈ 4 GiB).
+pub fn encode_frame(compressed: bool, payload: &[u8]) -> Result<Bytes, GrpcError> {
+    let len = u32::try_from(payload.len()).map_err(|_| GrpcError::PayloadTooLarge)?;
     let mut buf = BytesMut::with_capacity(5 + payload.len());
     buf.put_u8(u8::from(compressed));
-    buf.put_u32(payload.len() as u32);
+    buf.put_u32(len);
     buf.put_slice(payload);
-    buf.freeze()
+    Ok(buf.freeze())
 }
 
 #[derive(Debug, Error)]
-#[error("gRPC error: status {status}{}", message.as_ref().map(|m| format!(", {m}")).unwrap_or_default())]
-pub struct GrpcError {
-    pub status: u32,
-    pub message: Option<String>,
+pub enum GrpcError {
+    #[error("gRPC error: status {status}{}", message.as_ref().map(|m| format!(", {m}")).unwrap_or_default())]
+    Status {
+        status: u32,
+        message: Option<String>,
+    },
+
+    #[error("gRPC payload exceeds maximum frame size (4 GiB)")]
+    PayloadTooLarge,
 }
 
 /// Check the `grpc-status` trailer from an HTTP/2 response.
@@ -49,7 +58,7 @@ pub fn check_grpc_status(trailers: Option<&hyper::HeaderMap>) -> Result<(), Grpc
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_owned());
 
-    Err(GrpcError { status, message })
+    Err(GrpcError::Status { status, message })
 }
 
 #[cfg(test)]
@@ -59,7 +68,7 @@ mod tests {
     #[test]
     fn encode_frame_uncompressed() {
         let payload = b"hello";
-        let frame = encode_frame(false, payload);
+        let frame = encode_frame(false, payload).unwrap();
         assert_eq!(frame[0], 0); // not compressed
         assert_eq!(u32::from_be_bytes(frame[1..5].try_into().unwrap()), 5);
         assert_eq!(&frame[5..], b"hello");
@@ -68,7 +77,7 @@ mod tests {
     #[test]
     fn encode_frame_compressed() {
         let payload = b"data";
-        let frame = encode_frame(true, payload);
+        let frame = encode_frame(true, payload).unwrap();
         assert_eq!(frame[0], 1); // compressed
         assert_eq!(u32::from_be_bytes(frame[1..5].try_into().unwrap()), 4);
         assert_eq!(&frame[5..], b"data");
@@ -76,7 +85,7 @@ mod tests {
 
     #[test]
     fn encode_frame_empty_payload() {
-        let frame = encode_frame(false, &[]);
+        let frame = encode_frame(false, &[]).unwrap();
         assert_eq!(frame.len(), 5);
         assert_eq!(u32::from_be_bytes(frame[1..5].try_into().unwrap()), 0);
     }
@@ -105,8 +114,9 @@ mod tests {
         headers.insert("grpc-status", "13".parse().unwrap());
         headers.insert("grpc-message", "internal error".parse().unwrap());
         let err = check_grpc_status(Some(&headers)).unwrap_err();
-        assert_eq!(err.status, 13);
-        assert_eq!(err.message.as_deref(), Some("internal error"));
+        assert!(
+            matches!(err, GrpcError::Status { status: 13, ref message } if message.as_deref() == Some("internal error"))
+        );
     }
 
     #[test]
@@ -114,7 +124,12 @@ mod tests {
         let mut headers = hyper::HeaderMap::new();
         headers.insert("grpc-status", "2".parse().unwrap());
         let err = check_grpc_status(Some(&headers)).unwrap_err();
-        assert_eq!(err.status, 2);
-        assert!(err.message.is_none());
+        assert!(matches!(
+            err,
+            GrpcError::Status {
+                status: 2,
+                message: None
+            }
+        ));
     }
 }

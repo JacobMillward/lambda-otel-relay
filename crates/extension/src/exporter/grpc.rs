@@ -70,9 +70,9 @@ impl GrpcExporter {
             Compression::Gzip => {
                 headers.push(("grpc-encoding".to_owned(), "gzip".to_owned()));
                 let compressed = compress_gzip(protobuf)?;
-                grpc_codec::encode_frame(true, &compressed)
+                grpc_codec::encode_frame(true, &compressed)?
             }
-            Compression::None => grpc_codec::encode_frame(false, protobuf),
+            Compression::None => grpc_codec::encode_frame(false, protobuf)?,
         };
 
         let resp = self.0.send(&url, headers, body.to_vec()).await?;
