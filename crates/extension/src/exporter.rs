@@ -9,21 +9,21 @@ use aws_sigv4::sign::v4;
 use bytes::Bytes;
 use flate2::write::GzEncoder;
 use prost::Message;
-use reqwest::Client;
 use thiserror::Error;
 use url::Url;
 
 use crate::buffers::BufferData;
 use crate::config::{Compression, Config, SigV4Config};
+use crate::http_client::{ClientError, HttpClient};
 use crate::merge;
 
 #[derive(Debug, Error)]
 pub enum ExportError {
     #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] ClientError),
 
     #[error("collector rejected payload: {status}")]
-    Rejected { status: reqwest::StatusCode },
+    Rejected { status: hyper::StatusCode },
 
     #[error("gzip compression failed: {0}")]
     Compression(#[from] std::io::Error),
@@ -34,14 +34,8 @@ pub enum ExportError {
 
 #[derive(Debug, Error)]
 pub enum ExporterError {
-    #[error("LAMBDA_OTEL_RELAY_CERTIFICATE: invalid PEM: {0}")]
-    InvalidCaCertificate(reqwest::Error),
-
-    #[error("LAMBDA_OTEL_RELAY_CLIENT_CERT/CLIENT_KEY: invalid PEM: {0}")]
-    InvalidClientIdentity(reqwest::Error),
-
     #[error("failed to build HTTP client: {0}")]
-    ClientBuild(reqwest::Error),
+    ClientBuild(#[from] ClientError),
 }
 
 /// Abstraction over exporting telemetry data to a collector.
@@ -54,7 +48,7 @@ pub trait Exporter: Send + Sync + 'static {
 }
 
 pub struct OtlpExporter {
-    client: Client,
+    client: HttpClient,
     endpoint: Url,
     compression: Compression,
     headers: Vec<(String, String)>,
@@ -63,26 +57,12 @@ pub struct OtlpExporter {
 
 impl OtlpExporter {
     pub fn new(config: &Config) -> Result<Self, ExporterError> {
-        let mut builder = Client::builder().timeout(config.export_timeout);
-
-        if let Some(ca_pem) = &config.tls_ca {
-            let certs = reqwest::Certificate::from_pem_bundle(ca_pem)
-                .map_err(ExporterError::InvalidCaCertificate)?;
-            for cert in certs {
-                builder = builder.add_root_certificate(cert);
-            }
-        }
-
-        if let Some(cert_pem) = &config.tls_client_cert {
-            let key_pem = config.tls_client_key.as_ref().unwrap();
-            let mut identity_pem = cert_pem.clone();
-            identity_pem.extend_from_slice(key_pem);
-            let identity = reqwest::Identity::from_pem(&identity_pem)
-                .map_err(ExporterError::InvalidClientIdentity)?;
-            builder = builder.identity(identity);
-        }
-
-        let client = builder.build().map_err(ExporterError::ClientBuild)?;
+        let client = HttpClient::new(
+            config.export_timeout,
+            config.tls_ca.as_deref(),
+            config.tls_client_cert.as_deref(),
+            config.tls_client_key.as_deref(),
+        )?;
 
         Ok(Self {
             client,
@@ -151,18 +131,13 @@ impl OtlpExporter {
             headers.extend(signing_headers);
         }
 
-        let mut req = self.client.post(url);
-        for (k, v) in &headers {
-            req = req.header(k.as_str(), v.as_str());
-        }
+        let resp = self.client.post(url.as_str(), &headers, body).await?;
 
-        let resp = req.body(body).send().await?;
-
-        if resp.status().is_success() {
+        if resp.status.is_success() {
             Ok(())
         } else {
             Err(ExportError::Rejected {
-                status: resp.status(),
+                status: resp.status,
             })
         }
     }

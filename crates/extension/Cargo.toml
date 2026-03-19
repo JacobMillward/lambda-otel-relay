@@ -9,14 +9,13 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "gzip"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
 nanoserde = { version = "0.2", features = ["std", "json"] }
 thiserror = "2.0.18"
 tokio-util = { version = "0.7", features = ["rt"] }
 bytes = "1"
-hyper = { version = "1", features = ["http1", "http2", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
+hyper = { version = "1", features = ["client", "http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "client-legacy", "http1", "http2"] }
 http-body-util = "0.1"
 url = "2"
 tracing = "0.1"
@@ -26,10 +25,14 @@ prost = "0.14"
 flate2 = "1"
 aws-sigv4 = { version = "1", default-features = false, features = ["sign-http", "http1"] }
 aws-credential-types = "1"
+hyper-rustls = { version = "0.27.7", default-features = false, features = ["ring", "http1", "http2", "tls12"] }
+rustls-pemfile = "2.2.0"
+webpki-roots = "1.0.6"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls-no-provider", "http2"] }
 
 [build-dependencies]
 prost-build = "0.14"

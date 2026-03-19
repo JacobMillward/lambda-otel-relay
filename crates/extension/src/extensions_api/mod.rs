@@ -3,6 +3,10 @@
 use std::fmt;
 use std::future::Future;
 
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full};
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use nanoserde::DeJson;
 use thiserror::Error;
 
@@ -23,7 +27,7 @@ pub trait ExtensionsApi {
 #[derive(Debug, Error)]
 pub enum ApiError {
     #[error("extensions API HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
     #[error("failed to parse response: {0}")]
     Parse(#[from] nanoserde::DeJsonErr),
     #[error("missing Lambda-Extension-Identifier header")]
@@ -113,9 +117,11 @@ fn registration_events(mode: RuntimeMode) -> &'static str {
     }
 }
 
+type HttpClient = Client<hyper_util::client::legacy::connect::HttpConnector, Full<Bytes>>;
+
 #[derive(Debug)]
 pub struct ExtensionApiClient {
-    client: reqwest::Client,
+    client: HttpClient,
     runtime_api: String,
     ext_id: String,
 }
@@ -126,15 +132,20 @@ impl ExtensionApiClient {
     pub async fn register(mode: RuntimeMode) -> Result<Self, ApiError> {
         let runtime_api =
             std::env::var("AWS_LAMBDA_RUNTIME_API").map_err(|_| ApiError::MissingRuntimeApi)?;
-        let client = reqwest::Client::new();
+        let client: HttpClient = Client::builder(TokioExecutor::new()).build_http();
         let extensions_url = format!("http://{runtime_api}/2020-01-01/extension");
 
-        let resp = client
-            .post(format!("{extensions_url}/register"))
+        let req = hyper::Request::builder()
+            .method(hyper::Method::POST)
+            .uri(format!("{extensions_url}/register"))
             .header("Lambda-Extension-Name", EXTENSION_NAME)
-            .body(registration_events(mode))
-            .send()
-            .await?;
+            .body(Full::new(Bytes::from(registration_events(mode))))
+            .map_err(|e| ApiError::Http(e.to_string()))?;
+
+        let resp = client
+            .request(req)
+            .await
+            .map_err(|e| ApiError::Http(e.to_string()))?;
 
         let ext_id = resp
             .headers()
@@ -144,7 +155,13 @@ impl ExtensionApiClient {
             .map_err(|_| ApiError::MissingExtensionId)?
             .to_owned();
 
-        let body = resp.text().await?;
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .map_err(|e| ApiError::Http(e.to_string()))?
+            .to_bytes();
+        let body = String::from_utf8_lossy(&body);
         let reg: RegisterResponse = DeJson::deserialize_json(&body)?;
         tracing::debug!(
             function = reg.function_name,
@@ -170,14 +187,17 @@ impl ExtensionApiClient {
             self.runtime_api
         );
         let body = format!(r#"{{"errorMessage":"{message}","errorType":"{error_type}"}}"#);
-        let _ = self
-            .client
-            .post(&url)
+
+        let req = hyper::Request::builder()
+            .method(hyper::Method::POST)
+            .uri(&url)
             .header("Lambda-Extension-Identifier", &self.ext_id)
             .header("Lambda-Extension-Function-Error-Type", error_type)
-            .body(body)
-            .send()
-            .await;
+            .body(Full::new(Bytes::from(body)));
+
+        if let Ok(req) = req {
+            let _ = self.client.request(req).await;
+        }
     }
 
     /// Report an exit error to the Lambda Extensions API before exiting.
@@ -189,14 +209,17 @@ impl ExtensionApiClient {
             self.runtime_api
         );
         let body = format!(r#"{{"errorMessage":"{message}","errorType":"{error_type}"}}"#);
-        let _ = self
-            .client
-            .post(&url)
+
+        let req = hyper::Request::builder()
+            .method(hyper::Method::POST)
+            .uri(&url)
             .header("Lambda-Extension-Identifier", &self.ext_id)
             .header("Lambda-Extension-Function-Error-Type", error_type)
-            .body(body)
-            .send()
-            .await;
+            .body(Full::new(Bytes::from(body)));
+
+        if let Ok(req) = req {
+            let _ = self.client.request(req).await;
+        }
     }
 }
 
@@ -209,17 +232,28 @@ impl ExtensionsApi for ExtensionApiClient {
             r#"{{"schemaVersion":"2022-07-01","types":["platform"],"buffering":{{"timeoutMs":25,"maxBytes":262144,"maxItems":1000}},"destination":{{"protocol":"HTTP","URI":"http://sandbox:{port}"}}}}"#
         );
 
+        let req = hyper::Request::builder()
+            .method(hyper::Method::PUT)
+            .uri(&url)
+            .header("Lambda-Extension-Identifier", &self.ext_id)
+            .body(Full::new(Bytes::from(body)))
+            .map_err(|e| ApiError::Http(e.to_string()))?;
+
         let resp = self
             .client
-            .put(&url)
-            .header("Lambda-Extension-Identifier", &self.ext_id)
-            .body(body)
-            .send()
-            .await?;
+            .request(req)
+            .await
+            .map_err(|e| ApiError::Http(e.to_string()))?;
 
         let status = resp.status();
         if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = resp
+                .into_body()
+                .collect()
+                .await
+                .map_err(|e| ApiError::Http(e.to_string()))?
+                .to_bytes();
+            let body = String::from_utf8_lossy(&body).into_owned();
             return Err(ApiError::TelemetryRegistrationFailed {
                 status: status.as_u16(),
                 body,
@@ -231,17 +265,29 @@ impl ExtensionsApi for ExtensionApiClient {
     }
 
     async fn next_event(&self) -> Result<ExtensionsApiEvent, ApiError> {
-        let resp = self
-            .client
-            .get(format!(
+        let req = hyper::Request::builder()
+            .method(hyper::Method::GET)
+            .uri(format!(
                 "http://{}/2020-01-01/extension/event/next",
                 self.runtime_api
             ))
             .header("Lambda-Extension-Identifier", &self.ext_id)
-            .send()
-            .await?;
+            .body(Full::new(Bytes::new()))
+            .map_err(|e| ApiError::Http(e.to_string()))?;
 
-        let body = resp.text().await?;
+        let resp = self
+            .client
+            .request(req)
+            .await
+            .map_err(|e| ApiError::Http(e.to_string()))?;
+
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .map_err(|e| ApiError::Http(e.to_string()))?
+            .to_bytes();
+        let body = String::from_utf8_lossy(&body);
         parse_event(&body)
     }
 }
