@@ -127,5 +127,6 @@ pub async fn dummy_config() -> crate::config::Config {
         tls_client_key: None,
         sigv4: None,
         enabled_signals: crate::buffers::EnabledSignals::all(),
+        protocol: crate::config::ExportProtocol::default(),
     }
 }

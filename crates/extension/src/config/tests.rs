@@ -785,3 +785,56 @@ fn enabled_signals_only_commas_errors() {
     .unwrap_err();
     assert!(matches!(err, ConfigError::NoSignalsEnabled));
 }
+
+// ---------------------------------------------------------------------------
+// Protocol
+// ---------------------------------------------------------------------------
+
+#[test]
+fn default_protocol_is_http_protobuf() {
+    let config = Config::parse(
+        &vars(&[("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318")]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert_eq!(config.protocol, ExportProtocol::HttpProtobuf);
+}
+
+#[test]
+fn protocol_http_protobuf() {
+    let config = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_PROTOCOL", "http/protobuf"),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert_eq!(config.protocol, ExportProtocol::HttpProtobuf);
+}
+
+#[test]
+fn protocol_grpc() {
+    let config = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4317"),
+            ("LAMBDA_OTEL_RELAY_PROTOCOL", "grpc"),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap();
+    assert_eq!(config.protocol, ExportProtocol::Grpc);
+}
+
+#[test]
+fn invalid_protocol() {
+    let err = Config::parse(
+        &vars(&[
+            ("LAMBDA_OTEL_RELAY_ENDPOINT", "http://localhost:4318"),
+            ("LAMBDA_OTEL_RELAY_PROTOCOL", "json"),
+        ]),
+        RuntimeMode::Standard,
+    )
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::InvalidProtocol(p) if p == "json"));
+}
