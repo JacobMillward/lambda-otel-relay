@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use bytes::Bytes;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
@@ -347,10 +347,22 @@ impl OutboundBuffer {
     }
 }
 
+/// Whether a failed flush notification is worth reporting.
+///
+/// A full channel means a notification is already queued, so the coordinator
+/// still wakes, and it dedups flushes inside its dedup window regardless. A
+/// closed channel means the event loop is gone, which the buffer cannot recover
+/// from on its own.
+fn is_reportable(err: &TrySendError<()>) -> bool {
+    matches!(err, TrySendError::Closed(_))
+}
+
 fn notify_flush_complete(tx: &mpsc::Sender<()>) {
-    if let Err(e) = tx.try_send(()) {
+    if let Err(e) = tx.try_send(())
+        && is_reportable(&e)
+    {
         error!(error = %e, "notify flush complete failed");
-    };
+    }
 }
 
 #[cfg(test)]

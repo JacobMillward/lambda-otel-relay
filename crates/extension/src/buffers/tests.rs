@@ -285,3 +285,16 @@ async fn spawn_flush_notifies_when_complete() {
         "Expected notification for flush completion"
     );
 }
+
+#[test]
+fn full_notify_channel_is_not_reportable() {
+    // A queued notification already wakes the coordinator, so a full channel
+    // is not a failure.
+    assert!(!is_reportable(&TrySendError::Full(())));
+}
+
+#[test]
+fn closed_notify_channel_is_reportable() {
+    // A closed channel means the event loop is gone, which is worth an error.
+    assert!(is_reportable(&TrySendError::Closed(())));
+}
